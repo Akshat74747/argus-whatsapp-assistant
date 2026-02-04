@@ -6,7 +6,7 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-import { initDb, getStats, getPendingEvents, getEventById, closeDb, getAllMessages, getAllEvents, updateEventStatus, deleteEvent } from './db.js';
+import { initDb, getStats, getEventById, closeDb, getAllMessages, getAllEvents, deleteEvent } from './db.js';
 import { initGemini } from './gemini.js';
 import { processWebhook } from './ingestion.js';
 import { matchContext, extractContextFromUrl } from './matcher.js';
@@ -52,11 +52,15 @@ if (config.evolutionPg) {
     if (ok) {
       console.log('✅ Evolution PostgreSQL connected');
       // Resolve instance name to ID
-      resolvedInstanceId = await getInstanceIdByName(config.evolutionInstanceName);
-      if (resolvedInstanceId) {
-        console.log(`✅ Instance "${config.evolutionInstanceName}" → ${resolvedInstanceId}`);
+      if (config.evolutionInstanceName) {
+        resolvedInstanceId = await getInstanceIdByName(config.evolutionInstanceName);
+        if (resolvedInstanceId) {
+          console.log(`✅ Instance "${config.evolutionInstanceName}" → ${resolvedInstanceId}`);
+        } else {
+          console.log(`⚠️ Instance "${config.evolutionInstanceName}" not found, will query all`);
+        }
       } else {
-        console.log(`⚠️ Instance "${config.evolutionInstanceName}" not found, will query all`);
+        console.log('⚠️ No instance name configured, will query all');
       }
     } else {
       console.log('⚠️ Evolution PostgreSQL not available');
@@ -91,7 +95,8 @@ wss.on('connection', (ws) => {
 
 function broadcast(data: object): void {
   const message = JSON.stringify(data);
-  console.log(`📢 Broadcasting to ${clients.size} clients:`, data.type || 'unknown');
+  const type = 'type' in data ? (data as { type: string }).type : 'unknown';
+  console.log(`📢 Broadcasting to ${clients.size} clients:`, type);
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(message);
