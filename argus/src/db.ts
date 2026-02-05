@@ -25,6 +25,32 @@ export function initDb(dbPath: string): Database.Database {
   db.pragma('cache_size = 10000');
   db.pragma('temp_store = MEMORY');
 
+  // Migration: Add missing columns to existing tables
+  try {
+    // Check if reminder_time column exists in events table
+    const tableInfo = db.prepare("PRAGMA table_info(events)").all() as Array<{ name: string }>;
+    const hasReminderTime = tableInfo.some(col => col.name === 'reminder_time');
+    const hasContextUrl = tableInfo.some(col => col.name === 'context_url');
+    const hasDismissCount = tableInfo.some(col => col.name === 'dismiss_count');
+    
+    if (tableInfo.length > 0) { // Table exists
+      if (!hasReminderTime) {
+        console.log('⚙️  Adding reminder_time column to events table...');
+        db.exec('ALTER TABLE events ADD COLUMN reminder_time INTEGER');
+      }
+      if (!hasContextUrl) {
+        console.log('⚙️  Adding context_url column to events table...');
+        db.exec('ALTER TABLE events ADD COLUMN context_url TEXT');
+      }
+      if (!hasDismissCount) {
+        console.log('⚙️  Adding dismiss_count column to events table...');
+        db.exec('ALTER TABLE events ADD COLUMN dismiss_count INTEGER DEFAULT 0');
+      }
+    }
+  } catch (err) {
+    // Table doesn't exist yet, will be created below
+  }
+
   // Create tables
   db.exec(`
     -- Messages table
@@ -40,7 +66,7 @@ export function initDb(dbPath: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id);
     CREATE INDEX IF NOT EXISTS idx_messages_chat_time ON messages(chat_id, timestamp DESC);
 
-    -- Events table
+    -- Events table (with new columns for reminder flow)
     CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       message_id TEXT,
@@ -52,7 +78,10 @@ export function initDb(dbPath: string): Database.Database {
       participants TEXT,
       keywords TEXT NOT NULL,
       confidence REAL,
-      status TEXT DEFAULT 'pending',
+      status TEXT DEFAULT 'discovered',
+      reminder_time INTEGER,
+      context_url TEXT,
+      dismiss_count INTEGER DEFAULT 0,
       created_at INTEGER DEFAULT (strftime('%s', 'now')),
       FOREIGN KEY (message_id) REFERENCES messages(id)
     );
@@ -60,6 +89,8 @@ export function initDb(dbPath: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
     CREATE INDEX IF NOT EXISTS idx_events_location ON events(location);
     CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
+    CREATE INDEX IF NOT EXISTS idx_events_reminder ON events(reminder_time);
+    CREATE INDEX IF NOT EXISTS idx_events_context_url ON events(context_url);
 
     -- Contacts table
     CREATE TABLE IF NOT EXISTS contacts (
@@ -77,6 +108,7 @@ export function initDb(dbPath: string): Database.Database {
       trigger_type TEXT NOT NULL,
       trigger_value TEXT,
       is_fired INTEGER DEFAULT 0,
+      fire_count INTEGER DEFAULT 0,
       created_at INTEGER DEFAULT (strftime('%s', 'now')),
       FOREIGN KEY (event_id) REFERENCES events(id)
     );
@@ -90,6 +122,17 @@ export function initDb(dbPath: string): Database.Database {
       keys TEXT NOT NULL,
       created_at INTEGER DEFAULT (strftime('%s', 'now'))
     );
+
+    -- Context dismissals table (tracks dismissed context reminders per URL pattern)
+    CREATE TABLE IF NOT EXISTS context_dismissals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id INTEGER NOT NULL,
+      url_pattern TEXT NOT NULL,
+      dismissed_until INTEGER,
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      FOREIGN KEY (event_id) REFERENCES events(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_context_dismissals_url ON context_dismissals(url_pattern);
   `);
 
   // Create FTS5 virtual table for full-text search
@@ -154,8 +197,8 @@ export function getMessageById(id: string): Message | undefined {
 // ============ Event Operations ============
 export function insertEvent(event: Omit<Event, 'id' | 'created_at'>): number {
   const stmt = getDb().prepare(`
-    INSERT INTO events (message_id, event_type, title, description, event_time, location, participants, keywords, confidence, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO events (message_id, event_type, title, description, event_time, location, participants, keywords, confidence, status, context_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     event.message_id,
@@ -167,7 +210,8 @@ export function insertEvent(event: Omit<Event, 'id' | 'created_at'>): number {
     event.participants,
     event.keywords,
     event.confidence,
-    event.status || 'pending'
+    event.status || 'pending',
+    event.context_url || null
   );
   return result.lastInsertRowid as number;
 }
@@ -389,9 +433,129 @@ export function deleteEvent(id: number): void {
   // Delete associated triggers FIRST (foreign key constraint)
   const triggerStmt = getDb().prepare('DELETE FROM triggers WHERE event_id = ?');
   triggerStmt.run(id);
+  // Delete context dismissals
+  const dismissStmt = getDb().prepare('DELETE FROM context_dismissals WHERE event_id = ?');
+  dismissStmt.run(id);
   // Then delete the event
   const stmt = getDb().prepare('DELETE FROM events WHERE id = ?');
   stmt.run(id);
+}
+
+// ============ Enhanced Event Operations ============
+
+// Schedule a reminder for an event (1 hour before event_time)
+export function scheduleEventReminder(eventId: number): void {
+  const event = getEventById(eventId);
+  if (!event || !event.event_time) return;
+  
+  // Set reminder 1 hour before event
+  const reminderTime = event.event_time - 3600; // 1 hour = 3600 seconds
+  const now = Math.floor(Date.now() / 1000);
+  
+  // Only set if reminder time is in the future
+  if (reminderTime > now) {
+    const stmt = getDb().prepare(`
+      UPDATE events SET status = 'scheduled', reminder_time = ? WHERE id = ?
+    `);
+    stmt.run(reminderTime, eventId);
+    
+    // Also create a time trigger
+    insertTrigger({
+      event_id: eventId,
+      trigger_type: 'reminder_1hr',
+      trigger_value: reminderTime.toString(),
+      is_fired: false,
+    });
+  } else {
+    // Event is within 1 hour or past, mark as scheduled without reminder
+    const stmt = getDb().prepare(`
+      UPDATE events SET status = 'scheduled' WHERE id = ?
+    `);
+    stmt.run(eventId);
+  }
+}
+
+// Get events due for reminder (reminder_time has passed)
+export function getDueReminders(): Event[] {
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = getDb().prepare(`
+    SELECT * FROM events
+    WHERE status = 'scheduled' AND reminder_time IS NOT NULL AND reminder_time <= ?
+    ORDER BY reminder_time ASC
+  `);
+  return stmt.all(now) as Event[];
+}
+
+// Mark event as reminded
+export function markEventReminded(eventId: number): void {
+  const stmt = getDb().prepare(`
+    UPDATE events SET status = 'reminded' WHERE id = ?
+  `);
+  stmt.run(eventId);
+}
+
+// Get events with context URL that match a given URL
+export function getContextEventsForUrl(url: string): Event[] {
+  const stmt = getDb().prepare(`
+    SELECT * FROM events
+    WHERE context_url IS NOT NULL 
+    AND status NOT IN ('completed', 'expired')
+    AND ? LIKE '%' || context_url || '%'
+  `);
+  return stmt.all(url) as Event[];
+}
+
+// Dismiss a context event for a URL (can be temporary or permanent)
+export function dismissContextEvent(eventId: number, urlPattern: string, permanent = false): void {
+  if (permanent) {
+    // Mark as completed (won't show again)
+    updateEventStatus(eventId, 'completed');
+  } else {
+    // Increment dismiss count and store URL pattern for future reference
+    const stmt = getDb().prepare(`
+      UPDATE events SET dismiss_count = dismiss_count + 1 WHERE id = ?
+    `);
+    stmt.run(eventId);
+    
+    // Store dismissal with URL pattern (if provided) for potential re-trigger logic
+    if (urlPattern) {
+      try {
+        const dismissStmt = getDb().prepare(`
+          INSERT INTO context_dismissals (event_id, url_pattern, dismissed_until)
+          VALUES (?, ?, ?)
+        `);
+        // Dismiss for 30 minutes
+        const dismissUntil = Math.floor(Date.now() / 1000) + 1800;
+        dismissStmt.run(eventId, urlPattern, dismissUntil);
+      } catch (e) {
+        // Table might not exist in older DBs, ignore
+      }
+    }
+  }
+}
+
+// Set context URL for an event (for URL-based triggers like Netflix)
+export function setEventContextUrl(eventId: number, contextUrl: string): void {
+  const stmt = getDb().prepare(`
+    UPDATE events SET context_url = ? WHERE id = ?
+  `);
+  stmt.run(contextUrl, eventId);
+  
+  // Also create a URL trigger
+  insertTrigger({
+    event_id: eventId,
+    trigger_type: 'url',
+    trigger_value: contextUrl,
+    is_fired: false,
+  });
+}
+
+// Get events by status
+export function getEventsByStatus(status: string, limit = 50): Event[] {
+  const stmt = getDb().prepare(`
+    SELECT * FROM events WHERE status = ? ORDER BY created_at DESC LIMIT ?
+  `);
+  return stmt.all(status, limit) as Event[];
 }
 
 export function closeDb(): void {

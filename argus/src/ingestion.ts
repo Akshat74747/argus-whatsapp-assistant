@@ -12,6 +12,7 @@ interface CreatedEvent {
   participants: string;
   keywords: string;
   confidence: number;
+  context_url?: string | null;
 }
 
 interface IngestionResult {
@@ -114,7 +115,37 @@ export async function processMessage(
         }
       }
 
-      // Insert event
+      // Determine context_url for subscription types (Netflix, Amazon, etc.)
+      let contextUrl: string | null = null;
+      if (event.type === 'subscription' && event.location) {
+        // Extract domain from location if it looks like a URL
+        const locationLower = event.location.toLowerCase();
+        if (locationLower.includes('.com') || locationLower.includes('.in') || locationLower.includes('.org')) {
+          contextUrl = locationLower.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        } else {
+          // Map known services to their domains
+          const serviceDomains: Record<string, string> = {
+            'netflix': 'netflix.com',
+            'amazon prime': 'amazon.com',
+            'amazon': 'amazon.com',
+            'prime video': 'primevideo.com',
+            'hotstar': 'hotstar.com',
+            'disney': 'disneyplus.com',
+            'spotify': 'spotify.com',
+            'youtube': 'youtube.com',
+            'gym': 'gym',
+            'subscription': '',
+          };
+          for (const [service, domain] of Object.entries(serviceDomains)) {
+            if (locationLower.includes(service) && domain) {
+              contextUrl = domain;
+              break;
+            }
+          }
+        }
+      }
+
+      // Insert event with 'discovered' status - user needs to approve and set reminder
       const eventData = {
         message_id: message.id,
         event_type: event.type,
@@ -125,7 +156,8 @@ export async function processMessage(
         participants: JSON.stringify(event.participants),
         keywords: event.keywords.join(','),
         confidence: event.confidence,
-        status: 'pending' as const,
+        status: 'discovered' as const,
+        context_url: contextUrl,
       };
       const eventId = insertEvent(eventData);
       eventsCreated++;
@@ -141,6 +173,7 @@ export async function processMessage(
         participants: JSON.stringify(event.participants),
         keywords: event.keywords.join(','),
         confidence: event.confidence,
+        context_url: contextUrl,
       });
 
       // Create triggers

@@ -12,8 +12,18 @@ export const MessageSchema = z.object({
 export type Message = z.infer<typeof MessageSchema>;
 
 // ============ Event Schemas ============
-export const EventTypeEnum = z.enum(['meeting', 'deadline', 'reminder', 'travel', 'task', 'other']);
+export const EventTypeEnum = z.enum(['meeting', 'deadline', 'reminder', 'travel', 'task', 'subscription', 'recommendation', 'other']);
 export type EventType = z.infer<typeof EventTypeEnum>;
+
+// Event Status Flow:
+// - discovered: New event found, waiting for user to approve/set reminder
+// - scheduled: User approved, reminder is scheduled
+// - reminded: 1-hour reminder was sent
+// - completed: User marked as done
+// - dismissed: User dismissed (for context events, can reappear)
+// - expired: Event time has passed
+export const EventStatusEnum = z.enum(['discovered', 'scheduled', 'reminded', 'completed', 'dismissed', 'expired', 'pending']);
+export type EventStatus = z.infer<typeof EventStatusEnum>;
 
 export const EventSchema = z.object({
   id: z.number().optional(),
@@ -26,21 +36,39 @@ export const EventSchema = z.object({
   participants: z.string().nullable(), // JSON array
   keywords: z.string(), // comma-separated
   confidence: z.number().min(0).max(1),
-  status: z.enum(['pending', 'completed', 'expired']).default('pending'),
+  status: EventStatusEnum.default('discovered'),
+  reminder_time: z.number().nullable().optional(), // Unix timestamp for when to remind
+  context_url: z.string().nullable().optional(), // URL pattern that triggers this event (e.g., netflix.com)
+  dismiss_count: z.number().default(0).optional(), // How many times dismissed (for persistent reminders)
   created_at: z.number().optional(),
 });
 export type Event = z.infer<typeof EventSchema>;
 
 // ============ Trigger Schemas ============
+export const TriggerTypeEnum = z.enum(['time', 'url', 'keyword', 'reminder_1hr']);
+export type TriggerType = z.infer<typeof TriggerTypeEnum>;
+
 export const TriggerSchema = z.object({
   id: z.number().optional(),
   event_id: z.number(),
-  trigger_type: z.enum(['time', 'url', 'keyword']),
+  trigger_type: TriggerTypeEnum,
   trigger_value: z.string(),
   is_fired: z.boolean().default(false),
+  fire_count: z.number().default(0).optional(), // For URL triggers that can fire multiple times
   created_at: z.number().optional(),
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
+
+// ============ Popup Types ============
+// Used by extension to determine modal appearance and behavior
+export const PopupTypeEnum = z.enum([
+  'event_discovery',    // New event found - "Set reminder?"
+  'event_reminder',     // 1hr before event - "Event coming up!"
+  'context_reminder',   // URL-based trigger (Netflix) - persistent until done
+  'conflict_warning',   // Calendar conflict detected
+  'insight_card',       // Recommendation/suggestion
+]);
+export type PopupType = z.infer<typeof PopupTypeEnum>;
 
 // ============ Contact Schemas ============
 export const ContactSchema = z.object({

@@ -478,14 +478,20 @@ WebSocket: ws://localhost:3000
         try {
           var data = JSON.parse(e.data);
           if (data.type === 'notification') {
+            // New event discovered from WhatsApp - show toast in webapp
             showToast('New Event!', (data.event.title || 'Event') + ' - ' + (data.event.location || 'No location'), data.event.id);
             addLog('info', 'New event: ' + data.event.title);
+          } else if (data.type === 'context_reminder') {
+            // Context reminder - don't show toast in webapp, Chrome extension handles this
+            addLog('info', 'Context trigger: ' + (data.event?.title || 'unknown'));
           } else if (data.type === 'new_events') {
             addLog('info', data.count + ' new events created');
           } else if (data.type === 'event_updated') {
             addLog('success', 'Event #' + data.eventId + ' ' + data.status);
           } else if (data.type === 'event_deleted') {
             addLog('warning', 'Event #' + data.eventId + ' deleted');
+          } else if (data.type === 'event_dismissed') {
+            addLog('info', 'Event dismissed');
           }
           refreshEvents();
           fetchStats();

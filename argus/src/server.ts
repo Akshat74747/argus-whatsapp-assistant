@@ -6,11 +6,11 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-import { initDb, getStats, getEventById, closeDb, getAllMessages, getAllEvents, deleteEvent } from './db.js';
+import { initDb, getStats, getEventById, closeDb, getAllMessages, getAllEvents, deleteEvent, scheduleEventReminder, dismissContextEvent, setEventContextUrl, updateEventStatus, getEventsByStatus } from './db.js';
 import { initGemini } from './gemini.js';
 import { processWebhook } from './ingestion.js';
 import { matchContext, extractContextFromUrl } from './matcher.js';
-import { startScheduler, stopScheduler, completeEvent } from './scheduler.js';
+import { startScheduler, stopScheduler, completeEvent, checkContextTriggers } from './scheduler.js';
 import { parseConfig, WhatsAppWebhookSchema, ContextCheckRequestSchema } from './types.js';
 import { 
   initEvolutionDb, 
@@ -180,6 +180,72 @@ app.delete('/api/events/:id', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// ============ Enhanced Event Flow Endpoints ============
+
+// Set reminder for an event (user accepts in popup type 1)
+// Changes status from 'discovered' to 'scheduled' and sets reminder_time
+app.post('/api/events/:id/set-reminder', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id as string);
+  const event = getEventById(id);
+  
+  if (!event) {
+    res.status(404).json({ error: 'Event not found' });
+    return;
+  }
+  
+  scheduleEventReminder(id);
+  broadcast({ type: 'event_scheduled', eventId: id });
+  res.json({ success: true, message: 'Reminder scheduled for 1 hour before event' });
+});
+
+// Dismiss event (temporary - can reappear for context triggers)
+app.post('/api/events/:id/dismiss', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id as string);
+  const { permanent, urlPattern } = req.body;
+  
+  dismissContextEvent(id, urlPattern || '', permanent === true);
+  broadcast({ type: 'event_dismissed', eventId: id, permanent });
+  res.json({ success: true });
+});
+
+// Acknowledge reminder (user saw 1-hour reminder)
+app.post('/api/events/:id/acknowledge', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id as string);
+  // Status stays 'reminded' - user can still complete it later
+  broadcast({ type: 'event_acknowledged', eventId: id });
+  res.json({ success: true, message: 'Reminder acknowledged' });
+});
+
+// Mark event as done (final completion)
+app.post('/api/events/:id/done', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id as string);
+  updateEventStatus(id, 'completed');
+  broadcast({ type: 'event_completed', eventId: id });
+  res.json({ success: true, message: 'Event marked as done' });
+});
+
+// Set context URL for an event (for URL-based triggers like Netflix)
+app.post('/api/events/:id/context-url', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id as string);
+  const { url } = req.body;
+  
+  if (!url) {
+    res.status(400).json({ error: 'URL required' });
+    return;
+  }
+  
+  setEventContextUrl(id, url);
+  res.json({ success: true, message: 'Context URL set' });
+});
+
+// Get events by status (for extension to fetch discovered events)
+app.get('/api/events/status/:status', (req: Request, res: Response) => {
+  const status = req.params.status as string;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const events = getEventsByStatus(status, limit);
+  res.json(events);
+});
+
 // ============ Messages API (Argus local DB) ============
 app.get('/api/messages', (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 50;
@@ -284,6 +350,13 @@ app.get('/api/whatsapp/stats', async (_req: Request, res: Response) => {
 // WhatsApp webhook
 app.post('/api/webhook/whatsapp', async (req: Request, res: Response) => {
   try {
+    // Only process messages.upsert events (new messages)
+    // Ignore messages.update (read receipts, status updates)
+    if (req.body.event !== 'messages.upsert') {
+      res.json({ skipped: true, reason: 'event_type_ignored', event: req.body.event });
+      return;
+    }
+
     const parsed = WhatsAppWebhookSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid payload', details: parsed.error.errors });
@@ -318,13 +391,34 @@ app.post('/api/context-check', async (req: Request, res: Response) => {
       return;
     }
 
+    // First check for URL-based context triggers (Netflix scenario)
+    const contextTriggers = checkContextTriggers(parsed.data.url);
+    
+    if (contextTriggers.length > 0) {
+      // Broadcast context reminders to all clients
+      for (const trigger of contextTriggers) {
+        broadcast({ 
+          type: 'context_reminder', 
+          event: trigger,
+          popupType: 'context_reminder',
+          url: parsed.data.url
+        });
+      }
+    }
+
+    // Also do keyword-based matching
     const result = await matchContext(
       parsed.data.url,
       parsed.data.title,
       config.hotWindowDays
     );
 
-    res.json(result);
+    // Return context triggers directly in response (for extension to show popups)
+    res.json({
+      ...result,
+      contextTriggers: contextTriggers,  // Return full event objects
+      contextTriggersCount: contextTriggers.length,
+    });
   } catch (error) {
     console.error('Context check error:', error);
     res.status(500).json({ error: 'Internal server error' });

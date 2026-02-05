@@ -66,11 +66,11 @@ Return JSON with this exact schema:
 {
   "events": [
     {
-      "type": "meeting" | "deadline" | "reminder" | "travel" | "task" | "other",
+      "type": "meeting" | "deadline" | "reminder" | "travel" | "task" | "subscription" | "recommendation" | "other",
       "title": "short title",
       "description": "full details or null",
       "event_time": "ISO datetime or null",
-      "location": "place name or null",
+      "location": "place name or URL/service name for subscriptions (e.g. netflix.com)",
       "participants": ["names mentioned"],
       "keywords": ["searchable", "keywords"],
       "confidence": 0.0 to 1.0
@@ -80,11 +80,19 @@ Return JSON with this exact schema:
 
 Rules:
 - Understand informal/broken English and Hinglish (Hindi+English mix)
+- Handle typos: "cancle" = "cancel", "tomoro" = "tomorrow"
 - "kal" = tomorrow, "aaj" = today, "parso" = day after tomorrow
+- "this week" = within 7 days, use end of week as event_time
 - Extract times like "5pm", "shaam ko" (evening), "subah" (morning)
+- For subscriptions (Netflix, Amazon Prime, gym, etc):
+  - type = "subscription"
+  - location = service domain (netflix.com, amazon.com, etc)
+  - title = action to take (Cancel Netflix, Renew subscription, etc)
+- Intent phrases like "want to", "need to", "have to", "should" indicate tasks
 - If no event/task found, return: {"events": []}
 - Keywords should include location, people, topics for future search
-- Confidence < 0.5 if uncertain`;
+- Confidence < 0.5 if uncertain
+- Even casual mentions of tasks/intentions should be captured with lower confidence`;
 
   const response = await callGemini(prompt);
   
@@ -144,20 +152,28 @@ Rules:
 }
 
 export async function classifyMessage(message: string): Promise<{ hasEvent: boolean; confidence: number }> {
-  // Quick heuristic check first
-  const eventKeywords = /\b(meet|meeting|call|tomorrow|kal|today|aaj|deadline|reminder|book|flight|hotel|birthday|party|event|task|todo|buy|get|bring|send|submit|complete|finish|cancel|pay|payment)\b/i;
-  const timePatterns = /\b(\d{1,2}:\d{2}|\d{1,2}\s*(am|pm)|morning|evening|night|subah|shaam|raat|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+  // Quick heuristic check first - include common typos and variations
+  const eventKeywords = /\b(meet|meeting|call|tomorrow|kal|today|aaj|deadline|reminder|book|flight|hotel|birthday|party|event|task|todo|buy|get|bring|send|submit|complete|finish|cancel|cancle|unsubscribe|subscription|netflix|amazon|prime|pay|payment|order|deliver|pickup|pick up|doctor|dentist|appointment|gym|class|lesson|exam|test|interview|plan|plans|planning|want to|need to|have to|should|must|gonna|going to|will)\b/i;
+  const timePatterns = /\b(\d{1,2}:\d{2}|\d{1,2}\s*(am|pm)|morning|evening|night|subah|shaam|raat|monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|month|next|this|tonight|today|tomorrow|kal|parso)\b/i;
+  const intentPatterns = /\b(want|need|have|should|must|gonna|going|will|planning|plan|remind|remember|don't forget|dont forget)\s+(to|me)\b/i;
   
   const hasKeyword = eventKeywords.test(message);
   const hasTime = timePatterns.test(message);
+  const hasIntent = intentPatterns.test(message);
   
-  if (!hasKeyword && !hasTime) {
-    return { hasEvent: false, confidence: 0.9 };
-  }
-  
-  if (hasKeyword && hasTime) {
+  // If message has intent + keyword, it's likely an event
+  if (hasIntent && hasKeyword) {
     return { hasEvent: true, confidence: 0.85 };
   }
   
-  return { hasEvent: hasKeyword || hasTime, confidence: 0.6 };
+  if (!hasKeyword && !hasTime && !hasIntent) {
+    return { hasEvent: false, confidence: 0.9 };
+  }
+  
+  if ((hasKeyword && hasTime) || (hasIntent && hasTime)) {
+    return { hasEvent: true, confidence: 0.85 };
+  }
+  
+  // Single signal - still worth checking with Gemini
+  return { hasEvent: hasKeyword || hasTime || hasIntent, confidence: 0.6 };
 }

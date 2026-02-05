@@ -14,22 +14,6 @@ interface EvolutionConfig {
   password: string;
 }
 
-interface EvolutionMessage {
-  id: string;
-  instanceId: string;
-  key: {
-    remoteJid: string;
-    fromMe: boolean;
-    id: string;
-  };
-  pushName: string | null;
-  message: string | null;
-  messageType: string;
-  messageTimestamp: number;
-  status: string;
-  participant: string | null;
-}
-
 interface EvolutionContact {
   id: string;
   remoteJid: string;

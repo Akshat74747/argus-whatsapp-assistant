@@ -1,569 +1,704 @@
-// Argus Content Script - Modal Overlay + Toast Notifications
+// Argus Content Script v2.1
+// In-page overlay popups for event notifications
+// Popup Types: event_discovery, event_reminder, context_reminder, conflict_warning, insight_card
 
-const STYLES = `
-/* ============ MODAL OVERLAY ============ */
-#argus-modal-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  z-index: 2147483646;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: argus-fade-in 0.2s ease-out;
-}
+(function() {
+  'use strict';
 
-@keyframes argus-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
+  // ============ STYLES ============
+  const STYLES = `
+    /* Reset for Argus elements */
+    #argus-modal-backdrop,
+    #argus-modal-backdrop * {
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    }
 
-@keyframes argus-scale-in {
-  from { transform: scale(0.9); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
-}
+    /* Modal Backdrop */
+    #argus-modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      z-index: 2147483647;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: argus-fade-in 0.25s ease-out;
+    }
 
-@keyframes argus-scale-out {
-  from { transform: scale(1); opacity: 1; }
-  to { transform: scale(0.9); opacity: 0; }
-}
+    @keyframes argus-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
 
-#argus-modal {
-  background: linear-gradient(145deg, #ffffff, #f8f9fa);
-  border-radius: 16px;
-  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4);
-  max-width: 420px;
-  width: 90%;
-  overflow: hidden;
-  animation: argus-scale-in 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
+    @keyframes argus-scale-in {
+      from { transform: scale(0.9) translateY(-20px); opacity: 0; }
+      to { transform: scale(1) translateY(0); opacity: 1; }
+    }
 
-#argus-modal.hiding {
-  animation: argus-scale-out 0.2s ease-in forwards;
-}
+    @keyframes argus-scale-out {
+      from { transform: scale(1); opacity: 1; }
+      to { transform: scale(0.9); opacity: 0; }
+    }
 
-.argus-modal-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 24px;
-  position: relative;
-}
+    /* Modal Container */
+    #argus-modal {
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
+      max-width: 420px;
+      width: 92%;
+      overflow: hidden;
+      animation: argus-scale-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
 
-.argus-modal-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  background: rgba(255,255,255,0.2);
-  border: none;
-  color: white;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
+    #argus-modal.hiding {
+      animation: argus-scale-out 0.2s ease-in forwards;
+    }
 
-.argus-modal-close:hover {
-  background: rgba(255,255,255,0.3);
-  transform: scale(1.1);
-}
+    /* Header */
+    .argus-header {
+      padding: 24px 24px 20px;
+      position: relative;
+      color: white;
+    }
 
-.argus-modal-icon {
-  width: 64px;
-  height: 64px;
-  background: rgba(255,255,255,0.2);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 16px;
-  font-size: 32px;
-}
+    .argus-header.discovery { background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); }
+    .argus-header.reminder { background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%); }
+    .argus-header.context { background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%); }
+    .argus-header.conflict { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+    .argus-header.insight { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
 
-.argus-modal-title {
-  color: white;
-  font-size: 22px;
-  font-weight: 700;
-  text-align: center;
-  margin: 0;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
+    .argus-close-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: white;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
 
-.argus-modal-subtitle {
-  color: rgba(255,255,255,0.9);
-  font-size: 14px;
-  text-align: center;
-  margin-top: 8px;
-}
+    .argus-close-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
 
-.argus-modal-body {
-  padding: 24px;
-}
+    .argus-icon {
+      width: 56px;
+      height: 56px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 12px;
+      font-size: 28px;
+    }
 
-.argus-modal-event-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #1a1a2e;
-  margin-bottom: 8px;
-}
+    .argus-title {
+      font-size: 20px;
+      font-weight: 700;
+      text-align: center;
+      margin: 0 0 4px;
+    }
 
-.argus-modal-event-desc {
-  color: #666;
-  font-size: 14px;
-  line-height: 1.5;
-  margin-bottom: 16px;
-}
+    .argus-subtitle {
+      font-size: 13px;
+      text-align: center;
+      opacity: 0.9;
+    }
 
-.argus-modal-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 20px;
-}
+    /* Body */
+    .argus-body {
+      padding: 20px 24px 24px;
+    }
 
-.argus-modal-meta-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: #f0f0f5;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  color: #444;
-}
+    .argus-event-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: #1f2937;
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
 
-.argus-modal-meta-item span {
-  font-size: 16px;
-}
+    .argus-event-desc {
+      font-size: 14px;
+      color: #6b7280;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
 
-.argus-modal-actions {
-  display: flex;
-  gap: 12px;
-}
+    .argus-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
 
-.argus-modal-btn {
-  flex: 1;
-  padding: 14px 24px;
-  border: none;
-  border-radius: 10px;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
+    .argus-meta-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #f3f4f6;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      color: #4b5563;
+    }
 
-.argus-modal-btn-accept {
-  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-  color: white;
-  box-shadow: 0 4px 15px rgba(56, 239, 125, 0.3);
-}
+    .argus-meta-item span {
+      font-size: 14px;
+    }
 
-.argus-modal-btn-accept:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(56, 239, 125, 0.4);
-}
+    .argus-question {
+      background: #f9fafb;
+      border: 1px dashed #d1d5db;
+      border-radius: 10px;
+      padding: 14px;
+      text-align: center;
+      font-size: 14px;
+      color: #4b5563;
+      margin-bottom: 20px;
+    }
 
-.argus-modal-btn-dismiss {
-  background: #f0f0f5;
-  color: #666;
-}
+    /* Actions */
+    .argus-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
 
-.argus-modal-btn-dismiss:hover {
-  background: #e5e5ea;
-  transform: translateY(-2px);
-}
+    .argus-actions-row {
+      display: flex;
+      gap: 10px;
+    }
 
-.argus-modal-footer {
-  padding: 12px 24px 16px;
-  text-align: center;
-  border-top: 1px solid #eee;
-}
+    .argus-btn {
+      flex: 1;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
 
-.argus-modal-powered {
-  font-size: 11px;
-  color: #999;
-}
+    .argus-btn:hover {
+      transform: translateY(-1px);
+    }
 
-.argus-modal-powered strong {
-  color: #667eea;
-}
+    .argus-btn:active {
+      transform: translateY(0);
+    }
 
-/* ============ TOAST NOTIFICATIONS ============ */
-#argus-overlay-container {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: 2147483647;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  pointer-events: none;
-}
+    .argus-btn-primary {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      color: white;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }
 
-.argus-toast {
-  background: linear-gradient(145deg, #1a1a2e, #16213e);
-  border: 1px solid rgba(88, 166, 255, 0.3);
-  border-radius: 12px;
-  padding: 16px 20px;
-  min-width: 320px;
-  max-width: 400px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  animation: argus-slide-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: all;
-  color: #e6edf3;
-}
+    .argus-btn-primary:hover {
+      box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+    }
 
-.argus-toast.new-event { border-left: 4px solid #3fb950; }
-.argus-toast.reminder { border-left: 4px solid #d29922; }
-.argus-toast.context { border-left: 4px solid #58a6ff; }
+    .argus-btn-success {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: white;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
 
-@keyframes argus-slide-in {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
+    .argus-btn-secondary {
+      background: #f3f4f6;
+      color: #4b5563;
+    }
 
-@keyframes argus-toast-out {
-  from { transform: translateX(0); opacity: 1; }
-  to { transform: translateX(100%); opacity: 0; }
-}
+    .argus-btn-secondary:hover {
+      background: #e5e7eb;
+    }
 
-.argus-toast.hiding {
-  animation: argus-toast-out 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
+    .argus-btn-outline {
+      background: transparent;
+      border: 1px solid #e5e7eb;
+      color: #6b7280;
+    }
 
-.argus-toast-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
+    .argus-btn-outline:hover {
+      background: #f9fafb;
+      border-color: #d1d5db;
+    }
 
-.argus-toast-title {
-  font-weight: 600;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+    /* Footer */
+    .argus-footer {
+      padding: 12px 24px;
+      text-align: center;
+      background: #f9fafb;
+      border-top: 1px solid #f3f4f6;
+    }
 
-.argus-toast-close {
-  background: none;
-  border: none;
-  color: #8b949e;
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  padding: 0;
-}
+    .argus-powered {
+      font-size: 11px;
+      color: #9ca3af;
+    }
 
-.argus-toast-close:hover { color: #e6edf3; }
+    .argus-powered strong {
+      color: #6366f1;
+    }
 
-.argus-toast-body {
-  margin-bottom: 16px;
-}
+    /* Toast Notifications */
+    #argus-toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 2147483646;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
 
-.argus-event-title {
-  font-weight: 500;
-  font-size: 15px;
-  margin-bottom: 4px;
-}
+    .argus-toast {
+      background: #1f2937;
+      border-radius: 10px;
+      padding: 14px 18px;
+      min-width: 280px;
+      max-width: 360px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      color: #f9fafb;
+      pointer-events: all;
+      animation: argus-slide-in 0.3s ease-out;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
 
-.argus-event-desc {
-  color: #8b949e;
-  font-size: 13px;
-  line-height: 1.4;
-}
+    @keyframes argus-slide-in {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
 
-.argus-event-meta {
-  display: flex;
-  gap: 12px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: #8b949e;
-}
+    .argus-toast.hiding {
+      animation: argus-slide-out 0.2s ease-in forwards;
+    }
 
-.argus-toast-actions {
-  display: flex;
-  gap: 8px;
-}
+    @keyframes argus-slide-out {
+      from { transform: translateX(0); opacity: 1; }
+      to { transform: translateX(100%); opacity: 0; }
+    }
 
-.argus-btn {
-  flex: 1;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
+    .argus-toast-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
 
-.argus-btn-accept {
-  background: #238636;
-  color: white;
-}
+    .argus-toast-content {
+      flex: 1;
+    }
 
-.argus-btn-accept:hover {
-  background: #2ea043;
-  transform: translateY(-1px);
-}
+    .argus-toast-title {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 2px;
+    }
 
-.argus-btn-reject {
-  background: #21262d;
-  color: #f85149;
-  border: 1px solid #30363d;
-}
+    .argus-toast-desc {
+      font-size: 12px;
+      color: #9ca3af;
+    }
 
-.argus-btn-reject:hover {
-  background: #30363d;
-  transform: translateY(-1px);
-}
-`;
+    .argus-toast-close {
+      background: none;
+      border: none;
+      color: #6b7280;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 0;
+      flex-shrink: 0;
+    }
 
-let overlayContainer = null;
-let styleElement = null;
-let currentModal = null;
-
-function ensureStyles() {
-  if (styleElement) return;
-  styleElement = document.createElement('style');
-  styleElement.textContent = STYLES;
-  document.head.appendChild(styleElement);
-}
-
-function createOverlay() {
-  if (overlayContainer) return overlayContainer;
-  
-  ensureStyles();
-  overlayContainer = document.createElement('div');
-  overlayContainer.id = 'argus-overlay-container';
-  document.body.appendChild(overlayContainer);
-
-  return overlayContainer;
-}
-
-// ============ MODAL OVERLAY ============
-function showModal(event, modalType = 'new-event') {
-  ensureStyles();
-  
-  // Remove existing modal
-  if (currentModal) {
-    closeModal();
-  }
-
-  const icon = modalType === 'new-event' ? '📅' : 
-               modalType === 'reminder' ? '⏰' : '🎯';
-  const headerTitle = modalType === 'new-event' ? 'New Event Detected!' : 
-                       modalType === 'reminder' ? 'Reminder!' : 'Relevant Event Found';
-  const headerSubtitle = modalType === 'new-event' ? 'From your WhatsApp messages' : 
-                          modalType === 'reminder' ? 'Don\'t forget!' : 'Matches your current context';
-
-  const backdrop = document.createElement('div');
-  backdrop.id = 'argus-modal-backdrop';
-  
-  const eventTime = event.event_time ? new Date(event.event_time * 1000) : null;
-  const timeStr = eventTime ? eventTime.toLocaleString('en-US', { 
-    weekday: 'short', 
-    month: 'short', 
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  }) : null;
-
-  backdrop.innerHTML = `
-    <div id="argus-modal">
-      <div class="argus-modal-header">
-        <button class="argus-modal-close">✕</button>
-        <div class="argus-modal-icon">${icon}</div>
-        <h2 class="argus-modal-title">${headerTitle}</h2>
-        <p class="argus-modal-subtitle">${headerSubtitle}</p>
-      </div>
-      <div class="argus-modal-body">
-        <div class="argus-modal-event-title">${event.title || 'Untitled Event'}</div>
-        ${event.description ? `<div class="argus-modal-event-desc">${event.description}</div>` : ''}
-        <div class="argus-modal-meta">
-          ${timeStr ? `<div class="argus-modal-meta-item"><span>📅</span> ${timeStr}</div>` : ''}
-          ${event.location ? `<div class="argus-modal-meta-item"><span>📍</span> ${event.location}</div>` : ''}
-          ${event.event_type ? `<div class="argus-modal-meta-item"><span>🏷️</span> ${event.event_type}</div>` : ''}
-        </div>
-        ${event.id ? `
-        <div class="argus-modal-actions">
-          <button class="argus-modal-btn argus-modal-btn-accept">✓ Accept</button>
-          <button class="argus-modal-btn argus-modal-btn-dismiss">✗ Dismiss</button>
-        </div>` : ''}
-      </div>
-      <div class="argus-modal-footer">
-        <span class="argus-modal-powered">Powered by <strong>Argus</strong></span>
-      </div>
-    </div>
+    .argus-toast-close:hover {
+      color: #f9fafb;
+    }
   `;
 
-  document.body.appendChild(backdrop);
-  currentModal = backdrop;
+  // ============ STATE ============
+  let styleElement = null;
+  let currentModal = null;
+  let toastContainer = null;
+  const shownEventIds = new Set();
 
-  // Event handlers
-  backdrop.querySelector('.argus-modal-close').onclick = () => closeModal();
-  backdrop.onclick = (e) => {
-    if (e.target === backdrop) closeModal();
-  };
-
-  const acceptBtn = backdrop.querySelector('.argus-modal-btn-accept');
-  const dismissBtn = backdrop.querySelector('.argus-modal-btn-dismiss');
-
-  if (acceptBtn) {
-    acceptBtn.onclick = () => {
-      chrome.runtime.sendMessage({ type: 'COMPLETE_EVENT', eventId: event.id });
-      closeModal();
-    };
-  }
-
-  if (dismissBtn) {
-    dismissBtn.onclick = () => {
-      chrome.runtime.sendMessage({ type: 'DELETE_EVENT', eventId: event.id });
-      closeModal();
-    };
-  }
-
-  // ESC key to close
-  const escHandler = (e) => {
-    if (e.key === 'Escape') {
-      closeModal();
-      document.removeEventListener('keydown', escHandler);
+  // ============ MODAL CONFIGURATION ============
+  const MODAL_CONFIGS = {
+    event_discovery: {
+      icon: '📅',
+      headerClass: 'discovery',
+      title: 'New Event Detected!',
+      subtitle: 'From your WhatsApp messages',
+      question: 'Would you like to set a reminder for this event?',
+      buttons: [
+        { text: '⏰ Set Reminder', action: 'set-reminder', style: 'primary' },
+        { text: 'Not Now', action: 'dismiss', style: 'secondary' },
+        { text: '🗑️ Delete', action: 'delete', style: 'outline' },
+      ]
+    },
+    event_reminder: {
+      icon: '⏰',
+      headerClass: 'reminder',
+      title: 'Event Starting Soon!',
+      subtitle: 'This is your scheduled reminder',
+      question: null,
+      buttons: [
+        { text: '✓ Got It', action: 'acknowledge', style: 'primary' },
+        { text: '✅ Mark Done', action: 'done', style: 'success' },
+      ]
+    },
+    context_reminder: {
+      icon: '🎯',
+      headerClass: 'context',
+      title: 'Remember This?',
+      subtitle: 'You mentioned wanting to do this',
+      question: 'Would you like to take action now?',
+      buttons: [
+        { text: '✅ Done', action: 'done', style: 'success' },
+        { text: 'Later', action: 'dismiss-temp', style: 'secondary' },
+        { text: "Don't Show Again", action: 'dismiss-permanent', style: 'outline' },
+      ]
+    },
+    conflict_warning: {
+      icon: '⚠️',
+      headerClass: 'conflict',
+      title: 'Schedule Conflict!',
+      subtitle: 'You may have overlapping commitments',
+      question: null,
+      buttons: [
+        { text: 'View Details', action: 'view', style: 'primary' },
+        { text: 'Ignore', action: 'dismiss', style: 'secondary' },
+      ]
+    },
+    insight_card: {
+      icon: '💡',
+      headerClass: 'insight',
+      title: 'Suggestion',
+      subtitle: 'Based on your conversations',
+      question: null,
+      buttons: [
+        { text: 'Thanks!', action: 'acknowledge', style: 'primary' },
+        { text: 'Not Relevant', action: 'dismiss', style: 'secondary' },
+      ]
     }
   };
-  document.addEventListener('keydown', escHandler);
 
-  // Auto-close after 30 seconds
-  setTimeout(() => {
-    if (currentModal === backdrop) {
-      closeModal();
-    }
-  }, 30000);
-}
-
-function closeModal() {
-  if (!currentModal) return;
-  
-  const modal = currentModal.querySelector('#argus-modal');
-  if (modal) {
-    modal.classList.add('hiding');
+  // ============ INITIALIZATION ============
+  function injectStyles() {
+    if (styleElement) return;
+    styleElement = document.createElement('style');
+    styleElement.id = 'argus-styles';
+    styleElement.textContent = STYLES;
+    document.head.appendChild(styleElement);
   }
-  
-  setTimeout(() => {
+
+  function createToastContainer() {
+    if (toastContainer) return toastContainer;
+    toastContainer = document.createElement('div');
+    toastContainer.id = 'argus-toast-container';
+    document.body.appendChild(toastContainer);
+    return toastContainer;
+  }
+
+  // ============ MODAL FUNCTIONS ============
+  function showModal(event, popupType = 'event_discovery', extraData = {}) {
+    // Prevent duplicate modals
+    if (event.id && shownEventIds.has(event.id)) {
+      console.log('[Argus] Modal already shown for event:', event.id);
+      return;
+    }
+
+    injectStyles();
+
+    // Close any existing modal
     if (currentModal) {
       currentModal.remove();
       currentModal = null;
     }
-  }, 200);
-}
 
-// ============ TOAST NOTIFICATIONS ============
-function showToast(event, toastType = 'context') {
-  const container = createOverlay();
+    if (event.id) {
+      shownEventIds.add(event.id);
+    }
 
-  const toast = document.createElement('div');
-  toast.className = 'argus-toast ' + toastType;
-  
-  const icon = toastType === 'new-event' ? '🆕' : 
-               toastType === 'reminder' ? '⏰' : '🎯';
-  const title = toastType === 'new-event' ? 'New Event Detected!' : 
-                toastType === 'reminder' ? 'Reminder!' : 'Argus Match';
-  
-  let html = '<div class="argus-toast-header">';
-  html += '<div class="argus-toast-title">' + icon + ' ' + title + '</div>';
-  html += '<button class="argus-toast-close">✕</button>';
-  html += '</div>';
-  html += '<div class="argus-toast-body">';
-  html += '<div class="argus-event-title">' + (event.title || 'Untitled Event') + '</div>';
-  if (event.description) {
-    html += '<div class="argus-event-desc">' + event.description + '</div>';
-  }
-  html += '<div class="argus-event-meta">';
-  if (event.location) {
-    html += '<span>📍 ' + event.location + '</span>';
-  }
-  if (event.event_time) {
-    html += '<span>📅 ' + new Date(event.event_time * 1000).toLocaleDateString() + '</span>';
-  }
-  html += '</div></div>';
-  if (event.id) {
-    html += '<div class="argus-toast-actions">';
-    html += '<button class="argus-btn argus-btn-accept">✓ Accept</button>';
-    html += '<button class="argus-btn argus-btn-reject">✗ Reject</button>';
+    const config = MODAL_CONFIGS[popupType] || MODAL_CONFIGS.event_discovery;
+
+    // Create backdrop
+    const backdrop = document.createElement('div');
+    backdrop.id = 'argus-modal-backdrop';
+
+    // Format event time
+    let timeDisplay = null;
+    if (event.event_time) {
+      const eventDate = new Date(event.event_time * 1000);
+      timeDisplay = eventDate.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+    }
+
+    // Build modal HTML
+    let html = '<div id="argus-modal">';
+    
+    // Header
+    html += '<div class="argus-header ' + config.headerClass + '">';
+    html += '<button class="argus-close-btn" data-action="close">✕</button>';
+    html += '<div class="argus-icon">' + config.icon + '</div>';
+    html += '<h2 class="argus-title">' + config.title + '</h2>';
+    html += '<p class="argus-subtitle">' + config.subtitle + '</p>';
     html += '</div>';
+
+    // Body
+    html += '<div class="argus-body">';
+    html += '<div class="argus-event-title">' + escapeHtml(event.title || 'Untitled Event') + '</div>';
+    
+    if (event.description) {
+      html += '<div class="argus-event-desc">' + escapeHtml(event.description) + '</div>';
+    }
+
+    // Meta info
+    html += '<div class="argus-meta">';
+    if (timeDisplay) {
+      html += '<div class="argus-meta-item"><span>📅</span> ' + timeDisplay + '</div>';
+    }
+    if (event.location) {
+      html += '<div class="argus-meta-item"><span>📍</span> ' + escapeHtml(event.location) + '</div>';
+    }
+    if (event.event_type) {
+      html += '<div class="argus-meta-item"><span>🏷️</span> ' + escapeHtml(event.event_type) + '</div>';
+    }
+    html += '</div>';
+
+    // Question
+    if (config.question) {
+      html += '<div class="argus-question">' + config.question + '</div>';
+    }
+
+    // Action buttons
+    if (event.id && config.buttons.length > 0) {
+      html += '<div class="argus-actions">';
+      html += '<div class="argus-actions-row">';
+      config.buttons.slice(0, 2).forEach(function(btn) {
+        html += '<button class="argus-btn argus-btn-' + btn.style + '" data-action="' + btn.action + '">' + btn.text + '</button>';
+      });
+      html += '</div>';
+      if (config.buttons.length > 2) {
+        html += '<button class="argus-btn argus-btn-' + config.buttons[2].style + '" data-action="' + config.buttons[2].action + '">' + config.buttons[2].text + '</button>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>'; // End body
+
+    // Footer
+    html += '<div class="argus-footer">';
+    html += '<span class="argus-powered">Powered by <strong>Argus</strong></span>';
+    html += '</div>';
+
+    html += '</div>'; // End modal
+
+    backdrop.innerHTML = html;
+    document.body.appendChild(backdrop);
+    currentModal = backdrop;
+
+    // Event handlers
+    backdrop.querySelectorAll('[data-action]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const action = this.getAttribute('data-action');
+        if (action === 'close') {
+          closeModal();
+        } else {
+          handleAction(action, event, popupType, extraData);
+        }
+      });
+    });
+
+    // Close on backdrop click (except for context reminders)
+    if (popupType !== 'context_reminder') {
+      backdrop.addEventListener('click', function(e) {
+        if (e.target === backdrop) {
+          closeModal();
+        }
+      });
+    }
+
+    console.log('[Argus] Modal shown:', popupType, event.title);
   }
-  
-  toast.innerHTML = html;  // Event handlers
-  toast.querySelector('.argus-toast-close').onclick = () => removeToast(toast);
-  
-  const acceptBtn = toast.querySelector('.argus-btn-accept');
-  const rejectBtn = toast.querySelector('.argus-btn-reject');
-  
-  if (acceptBtn) {
-    acceptBtn.onclick = () => {
-      chrome.runtime.sendMessage({ type: 'COMPLETE_EVENT', eventId: event.id });
+
+  function closeModal() {
+    if (!currentModal) return;
+
+    const modal = currentModal.querySelector('#argus-modal');
+    if (modal) {
+      modal.classList.add('hiding');
+    }
+
+    const modalToRemove = currentModal;
+    currentModal = null;
+
+    setTimeout(function() {
+      if (modalToRemove && modalToRemove.parentNode) {
+        modalToRemove.remove();
+      }
+    }, 200);
+  }
+
+  function handleAction(action, event, popupType, extraData) {
+    const eventId = event.id;
+    console.log('[Argus] Action:', action, 'Event:', eventId);
+
+    switch (action) {
+      case 'set-reminder':
+        chrome.runtime.sendMessage({ type: 'SET_REMINDER', eventId: eventId });
+        showToast('⏰ Reminder Set!', 'You will be notified before the event.');
+        break;
+
+      case 'acknowledge':
+        chrome.runtime.sendMessage({ type: 'ACKNOWLEDGE_REMINDER', eventId: eventId });
+        break;
+
+      case 'done':
+        chrome.runtime.sendMessage({ type: 'MARK_DONE', eventId: eventId });
+        showToast('✅ Marked as Done!', event.title);
+        break;
+
+      case 'dismiss':
+      case 'dismiss-temp':
+        chrome.runtime.sendMessage({
+          type: 'DISMISS_EVENT',
+          eventId: eventId,
+          permanent: false,
+          url: extraData.url || window.location.href
+        });
+        break;
+
+      case 'dismiss-permanent':
+        chrome.runtime.sendMessage({
+          type: 'DISMISS_EVENT',
+          eventId: eventId,
+          permanent: true,
+          url: extraData.url || window.location.href
+        });
+        showToast('Got it!', "Won't show this reminder again.");
+        break;
+
+      case 'delete':
+        chrome.runtime.sendMessage({ type: 'DELETE_EVENT', eventId: eventId });
+        showToast('🗑️ Event Deleted', event.title);
+        break;
+
+      case 'view':
+        chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD' });
+        break;
+    }
+
+    closeModal();
+  }
+
+  // ============ TOAST FUNCTIONS ============
+  function showToast(title, description) {
+    injectStyles();
+    const container = createToastContainer();
+
+    const toast = document.createElement('div');
+    toast.className = 'argus-toast';
+    toast.innerHTML = 
+      '<div class="argus-toast-icon">✓</div>' +
+      '<div class="argus-toast-content">' +
+        '<div class="argus-toast-title">' + escapeHtml(title) + '</div>' +
+        '<div class="argus-toast-desc">' + escapeHtml(description) + '</div>' +
+      '</div>' +
+      '<button class="argus-toast-close">✕</button>';
+
+    toast.querySelector('.argus-toast-close').addEventListener('click', function() {
       removeToast(toast);
-    };
-  }
-  
-  if (rejectBtn) {
-    rejectBtn.onclick = () => {
-      chrome.runtime.sendMessage({ type: 'DELETE_EVENT', eventId: event.id });
+    });
+
+    container.appendChild(toast);
+
+    // Auto-remove after 4 seconds
+    setTimeout(function() {
       removeToast(toast);
-    };
+    }, 4000);
   }
 
-  container.appendChild(toast);
+  function removeToast(toast) {
+    if (!toast || !toast.parentNode) return;
+    toast.classList.add('hiding');
+    setTimeout(function() {
+      if (toast.parentNode) {
+        toast.remove();
+      }
+    }, 200);
+  }
 
-  // Auto-dismiss after 15 seconds
-  setTimeout(() => removeToast(toast), 15000);
-}
+  // ============ UTILITIES ============
+  function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 
-function removeToast(toast) {
-  if (!toast.parentNode) return;
-  toast.classList.add('hiding');
-  setTimeout(() => toast.remove(), 300);
-}
+  // ============ MESSAGE HANDLERS ============
+  chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
+    console.log('[Argus] Content received:', message.type);
 
-function showNotification(events) {
-  events.slice(0, 3).forEach((event, index) => {
-    setTimeout(() => showToast(event, 'context'), index * 200);
+    switch (message.type) {
+      case 'ARGUS_NEW_EVENT':
+        showModal(message.event, 'event_discovery');
+        sendResponse({ received: true });
+        break;
+
+      case 'ARGUS_REMINDER':
+        showModal(message.event || { title: message.message }, 'event_reminder');
+        sendResponse({ received: true });
+        break;
+
+      case 'ARGUS_CONTEXT_REMINDER':
+        showModal(message.event, 'context_reminder', { url: message.url });
+        sendResponse({ received: true });
+        break;
+
+      case 'ARGUS_CONFLICT':
+        showModal(message.event, 'conflict_warning');
+        sendResponse({ received: true });
+        break;
+
+      case 'ARGUS_INSIGHT':
+        showModal(message.event, 'insight_card');
+        sendResponse({ received: true });
+        break;
+
+      default:
+        sendResponse({ received: false, error: 'Unknown message type' });
+    }
+
+    return true;
   });
-}
 
-// Listen for messages from background script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Argus Content: Received message:', message.type, message);
-  
-  if (message.type === 'ARGUS_NOTIFICATION') {
-    console.log('Argus Content: Showing notification for events');
-    showNotification(message.events);
-    sendResponse({ received: true });
-  } else if (message.type === 'ARGUS_NEW_EVENT') {
-    // Show prominent modal overlay for new events
-    console.log('Argus Content: Showing MODAL for new event:', message.event);
-    showModal(message.event, 'new-event');
-    sendResponse({ received: true });
-  } else if (message.type === 'ARGUS_REMINDER') {
-    // Show modal for reminders
-    console.log('Argus Content: Showing MODAL for reminder');
-    showModal(message.event || { title: message.message }, 'reminder');
-    sendResponse({ received: true });
-  }
-  return true;
-});
-
-console.log('Argus content script loaded');
+  console.log('[Argus] Content Script v2.1 loaded');
+})();
