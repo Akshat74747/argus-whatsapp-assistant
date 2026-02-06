@@ -133,6 +133,18 @@ async function handleWebSocketMessage(data) {
       });
       break;
 
+    case 'update_confirm':
+      console.log('[Argus] Update confirm:', data.eventTitle, data.description);
+      await sendToFirstAvailableTab({
+        type: 'ARGUS_UPDATE_CONFIRM',
+        eventId: data.eventId,
+        eventTitle: data.eventTitle,
+        changes: data.changes,
+        description: data.description,
+        popup: data.popup,
+      });
+      break;
+
     case 'event_updated':
       console.log('[Argus] Event updated:', data.eventId, data.fields);
       await sendToFirstAvailableTab({
@@ -208,8 +220,25 @@ async function sendToAllTabs(message) {
 
 // ============ CONTEXT CHECK ============
 
+// Sites where context-trigger polling is useless (saves API calls + log noise)
+const CONTEXT_CHECK_BLOCKLIST = [
+  'localhost', '127.0.0.1', '0.0.0.0',
+  'web.whatsapp.com', 'whatsapp.com',
+  'mail.google.com', 'accounts.google.com',
+  'chrome.google.com', 'extensions',
+  'new-tab-page',
+];
+
+function isBlockedForContextCheck(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    return CONTEXT_CHECK_BLOCKLIST.some(b => hostname === b || hostname.endsWith('.' + b));
+  } catch { return false; }
+}
+
 async function checkCurrentUrl(url, title) {
   if (!url || url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.startsWith('about:')) return;
+  if (isBlockedForContextCheck(url)) return;
   if (url === lastCheckedUrl) return;
   lastCheckedUrl = url;
 

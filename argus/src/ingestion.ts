@@ -30,6 +30,14 @@ interface ActionResult {
   message: string;
 }
 
+interface PendingAction {
+  action: string;
+  targetEventId: number;
+  targetEventTitle: string;
+  changes: Record<string, any>;
+  description: string; // human-readable summary of what will change
+}
+
 interface IngestionResult {
   messageId: string;
   eventsCreated: number;
@@ -40,6 +48,8 @@ interface IngestionResult {
   conflicts?: Array<{ eventId: number; conflictsWith: ConflictInfo[] }>;
   // Action results (for when user sends "cancel it", "done", etc.)
   actionPerformed?: ActionResult;
+  // Pending confirmation (for modify actions — user must approve)
+  pendingAction?: PendingAction;
 }
 
 export async function processWebhook(
@@ -165,45 +175,65 @@ export async function processWebhook(
           console.log(`💤 [ACTION] Snoozed event #${eventId} for ${minutes} min: "${targetEvent.title}"`);
           break;
 
-        case 'modify':
-          if (actionResult.newTime || actionResult.newTitle || actionResult.newLocation || actionResult.newDescription) {
-            const updateFields: Record<string, any> = {};
-            
-            if (actionResult.newTime) {
-              try {
-                let parsedTime = Math.floor(new Date(actionResult.newTime).getTime() / 1000);
-                if (!isNaN(parsedTime) && parsedTime > 0) {
-                  // Guard: if Gemini returned a past date, push forward by weeks
-                  const nowUnix = Math.floor(Date.now() / 1000);
-                  if (parsedTime < nowUnix - 3600) {
-                    const weekSec = 7 * 24 * 3600;
-                    while (parsedTime < nowUnix) parsedTime += weekSec;
-                    console.log(`⏩ [Date Fix] Action newTime was past, moved to ${new Date(parsedTime * 1000).toISOString()}`);
-                  }
-                  updateFields.event_time = parsedTime;
-                } else {
-                  console.log(`⚠️ [ACTION] Invalid newTime from Gemini: "${actionResult.newTime}" → NaN`);
+        case 'modify': {
+          // Build the proposed changes — but DON'T apply them yet.
+          // Return as pendingAction so the user gets a confirmation popup.
+          const proposedChanges: Record<string, any> = {};
+          
+          if (actionResult.newTime) {
+            try {
+              let parsedTime = Math.floor(new Date(actionResult.newTime).getTime() / 1000);
+              if (!isNaN(parsedTime) && parsedTime > 0) {
+                const nowUnix = Math.floor(Date.now() / 1000);
+                if (parsedTime < nowUnix - 3600) {
+                  const weekSec = 7 * 24 * 3600;
+                  while (parsedTime < nowUnix) parsedTime += weekSec;
+                  console.log(`⏩ [Date Fix] Action newTime was past, moved to ${new Date(parsedTime * 1000).toISOString()}`);
                 }
-              } catch {
-                // invalid time, skip
+                proposedChanges.event_time = parsedTime;
+              } else {
+                console.log(`⚠️ [ACTION] Invalid newTime from Gemini: "${actionResult.newTime}" → NaN`);
               }
+            } catch {
+              // invalid time, skip
             }
-            if (actionResult.newTitle) updateFields.title = actionResult.newTitle;
-            if (actionResult.newLocation) updateFields.location = actionResult.newLocation;
-            if (actionResult.newDescription) updateFields.description = actionResult.newDescription;
-            
-            const changed = updateEvent(eventId, updateFields);
-            if (changed) {
-              const changedStr = Object.keys(updateFields).join(', ');
-              actionMessage = `Updated "${targetEvent.title}": changed ${changedStr}`;
-              console.log(`📝 [ACTION] Updated event #${eventId}: ${changedStr}`);
-            } else {
-              actionMessage = `Could not update: no valid changes`;
-            }
-          } else {
-            actionMessage = `Modify requested but no changes specified`;
           }
+          if (actionResult.newTitle) proposedChanges.title = actionResult.newTitle;
+          if (actionResult.newLocation) proposedChanges.location = actionResult.newLocation;
+          if (actionResult.newDescription) proposedChanges.description = actionResult.newDescription;
+
+          if (Object.keys(proposedChanges).length > 0) {
+            // Build human-readable description of changes
+            const parts: string[] = [];
+            if (proposedChanges.title) parts.push(`title → "${proposedChanges.title}"`);
+            if (proposedChanges.event_time) {
+              const d = new Date(proposedChanges.event_time * 1000);
+              const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+              parts.push(`time → ${dayNames[d.getDay()]}, ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`);
+            }
+            if (proposedChanges.location) parts.push(`location → "${proposedChanges.location}"`);
+            if (proposedChanges.description) parts.push(`description updated`);
+            const changeDesc = parts.join(', ');
+
+            console.log(`📋 [ACTION] Modify proposed for event #${eventId} "${targetEvent.title}": ${changeDesc} — waiting for user confirmation`);
+
+            return {
+              messageId: message.id,
+              eventsCreated: 0,
+              triggersCreated: 0,
+              skipped: false,
+              pendingAction: {
+                action: 'modify',
+                targetEventId: eventId,
+                targetEventTitle: targetEvent.title,
+                changes: proposedChanges,
+                description: changeDesc,
+              },
+            };
+          }
+          actionMessage = `Modify requested but no changes specified`;
           break;
+        }
 
         default:
           actionMessage = `Unknown action: ${actionResult.action}`;

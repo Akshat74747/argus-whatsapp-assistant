@@ -456,6 +456,22 @@
         };
       }
 
+      case 'update_confirm': {
+        const changeDesc = extraData.description || 'Some changes have been proposed for this event.';
+        return {
+          icon: '📝',
+          headerClass: 'conflict',
+          title: 'Update Event?',
+          subtitle: sender !== 'Someone' ? sender + ' mentioned changes' : 'A message suggests changes to this event',
+          question: changeDesc,
+          buttons: [
+            { text: '✅ Yes, Update', action: 'confirm-update', style: 'primary' },
+            { text: '⏭️ Skip', action: 'dismiss', style: 'secondary' },
+            { text: '🚫 Ignore', action: 'ignore', style: 'outline' },
+          ]
+        };
+      }
+
       case 'insight_card':
         return {
           icon: '💡',
@@ -773,6 +789,28 @@
         );
         // Don't close modal — we'll update it inline
         return;
+
+      case 'confirm-update':
+        console.log(`[Argus] ✅ User confirmed update for event #${eventId}`);
+        var changes = extraData.changes || {};
+        fetch('http://localhost:3000/api/events/' + eventId + '/confirm-update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ changes: changes }),
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.ok) {
+            showToast('📝 Updated!', event.title + ' has been updated.');
+          } else {
+            showToast('❌ Update failed', data.error || 'Could not update event.');
+          }
+        })
+        .catch(function(err) {
+          console.error('[Argus] Confirm-update error:', err);
+          showToast('❌ Error', 'Could not reach server.');
+        });
+        break;
     }
 
     closeModal();
@@ -913,6 +951,16 @@
         sendResponse({ received: true });
         break;
 
+      case 'ARGUS_UPDATE_CONFIRM':
+        console.log(`[Argus] 📝 Update confirm: "${message.eventTitle}" (id: ${message.eventId})`);
+        showModal(
+          { id: message.eventId, title: message.eventTitle },
+          'update_confirm',
+          { description: message.description, changes: message.changes, popup: message.popup }
+        );
+        sendResponse({ received: true });
+        break;
+
       case 'ARGUS_ACTION_TOAST':
         console.log(`[Argus] 🎯 Action toast: "${message.action}" on "${message.eventTitle}"`);
         const actionEmoji = message.action === 'cancel' || message.action === 'delete' ? '🗑️' :
@@ -932,5 +980,5 @@
     return true;
   });
 
-  console.log('[Argus] Content Script v2.6.1 loaded — API-driven popups with CRUD');
+  console.log('[Argus] Content Script v2.6.3 loaded — update confirmations');
 })();

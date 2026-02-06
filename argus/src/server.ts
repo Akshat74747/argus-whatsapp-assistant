@@ -284,6 +284,39 @@ app.patch('/api/events/:id', (req: Request, res: Response) => {
   }
 });
 
+// Confirm a pending modify action (user clicked "Yes, update" in popup)
+app.post('/api/events/:id/confirm-update', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id as string);
+  const event = getEventById(id);
+  if (!event) {
+    res.status(404).json({ error: 'Event not found' });
+    return;
+  }
+
+  const { changes } = req.body; // { event_time, title, location, description }
+  if (!changes || typeof changes !== 'object' || Object.keys(changes).length === 0) {
+    res.status(400).json({ error: 'No changes provided' });
+    return;
+  }
+
+  const updated = updateEvent(id, changes);
+  if (updated) {
+    const changedStr = Object.keys(changes).join(', ');
+    console.log(`✅ [CONFIRM-UPDATE] Event #${id} "${event.title}" updated: [${changedStr}]`);
+    broadcast({
+      type: 'action_performed',
+      action: 'modify',
+      eventId: id,
+      eventTitle: event.title,
+      message: `Updated "${event.title}": changed ${changedStr}`,
+    });
+    const updatedEvent = getEventById(id);
+    res.json({ success: true, event: updatedEvent });
+  } else {
+    res.status(500).json({ error: 'Failed to apply update' });
+  }
+});
+
 // ============ Legacy Endpoints (for backwards compat) ============
 
 // Acknowledge reminder (user saw 1-hour reminder)
@@ -520,6 +553,34 @@ app.post('/api/webhook/whatsapp', async (req: Request, res: Response) => {
         eventId: result.actionPerformed.targetEventId,
         eventTitle: result.actionPerformed.targetEventTitle,
         message: result.actionPerformed.message,
+      });
+    }
+
+    // ============ Handle PENDING MODIFY (needs user confirmation) ============
+    if (result.pendingAction) {
+      const pa = result.pendingAction;
+      console.log(`📋 [WEBHOOK] Modify needs confirmation: "${pa.targetEventTitle}" → ${pa.description}`);
+
+      // Generate a confirmation popup via Gemini
+      const existingEvent = getEventById(pa.targetEventId);
+      let popup;
+      try {
+        popup = await generatePopupBlueprint(
+          existingEvent || { title: pa.targetEventTitle },
+          { conflictingEvents: [] },
+          'update_confirm'
+        );
+      } catch (err) {
+        console.error('⚠️ Popup blueprint generation failed (update_confirm):', err);
+      }
+
+      broadcast({
+        type: 'update_confirm',
+        eventId: pa.targetEventId,
+        eventTitle: pa.targetEventTitle,
+        changes: pa.changes,
+        description: pa.description,
+        popup,
       });
     }
 

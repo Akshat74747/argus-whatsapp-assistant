@@ -2,6 +2,30 @@
 
 All notable changes to Argus will be documented in this file.
 
+## [2.6.3] - 2026-02-06
+
+### Fixed — "URL Noise & Modify Confirmation"
+
+Two usability issues: (1) context-check polling was firing on useless sites like localhost and whatsapp.com, flooding logs with noise, and (2) when Gemini detected a "modify" action on an existing event, it auto-applied the update without asking the user first.
+
+### Added
+- **URL Blocklist for Context-Check Polling** (`background.js`)
+  - `CONTEXT_CHECK_BLOCKLIST` array: localhost, 127.0.0.1, whatsapp.com, mail.google.com, accounts.google.com, chrome.google.com, extensions, new-tab-page
+  - `isBlockedForContextCheck(url)` — checks tab URL against blocklist before polling `/api/context-check`
+  - Context triggers still fire on all other sites; popup notifications still work everywhere
+
+- **Modify Confirmation Popup** — full end-to-end flow
+  - `PendingAction` interface in `ingestion.ts` — modify case no longer auto-updates, instead returns `pendingAction` with proposed changes + human-readable description
+  - Server broadcasts `update_confirm` type via WebSocket with popup blueprint (`server.ts`)
+  - `POST /api/events/:id/confirm-update` endpoint — applies changes only when user clicks "Yes, Update" (`server.ts`)
+  - `update_confirm` popup type in `getPopupConfig()` — shows 📝 icon, change description, 3 buttons: ✅ Yes Update / ⏭️ Skip / 🚫 Ignore (`content.js`)
+  - `ARGUS_UPDATE_CONFIRM` message handler in content.js message listener
+  - `confirm-update` button action — calls `/api/events/:id/confirm-update` via fetch
+  - `update_confirm` case in background.js WebSocket handler — forwards to content script
+
+### Changed
+- Content script version bump to v2.6.2 → v2.6.3
+
 ## [2.6.2] - 2026-02-06
 
 ### Fixed — "Smart Date Resolution"
