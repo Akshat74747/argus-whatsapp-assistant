@@ -37,19 +37,36 @@ CRITICAL RULES:
 // ============ UNIFIED MESSAGE ANALYSIS ============
 // Single Gemini call replaces old classifyMessage() + extractEvents() two-step flow.
 // Gemini handles ALL classification and extraction — no brittle keyword heuristics.
+// Now also receives existing events so Gemini can detect updates/modifications.
 
 export async function analyzeMessage(
   message: string,
   context: string[] = [],
-  currentDate: string = new Date().toISOString()
+  currentDate: string = new Date().toISOString(),
+  existingEvents: Array<{ id: number; title: string; event_type: string; keywords: string; event_time: number | null; location: string | null; description: string | null; sender_name?: string | null }> = []
 ): Promise<GeminiExtraction> {
   const contextBlock = context.length > 0 
     ? `\nPrevious messages in this chat (for context):\n${context.map((m, i) => `${i + 1}. "${m}"`).join('\n')}\n`
     : '';
 
+  const existingEventsBlock = existingEvents.length > 0
+    ? `\nUser's EXISTING events/reminders (they may refer to these):\n${existingEvents.map((e) => {
+        let timeStr = 'no date set';
+        if (e.event_time) {
+          const d = new Date(e.event_time * 1000);
+          timeStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+          timeStr += ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        }
+        return `  [ID#${e.id}] "${e.title}" | type: ${e.event_type} | time: ${timeStr} | location: ${e.location || 'none'} | keywords: ${e.keywords} | sender: ${e.sender_name || 'unknown'}`;
+      }).join('\n')}\n`
+    : '';
+
   const prompt = `Analyze this WhatsApp message. First decide if it contains any real event/task/reminder. If yes, extract them. If no, return empty events array.
+
+IMPORTANT: If the message refers to or UPDATES an existing event (listed below), set "event_action" and "target_event_id" instead of creating a duplicate.
+
 Current date: ${currentDate}
-${contextBlock}
+${contextBlock}${existingEventsBlock}
 Message to analyze:
 "${message}"
 
@@ -64,10 +81,26 @@ Return JSON with this exact schema:
       "location": "place name (goa, mumbai) or service name (netflix, hotstar, amazon)",
       "participants": ["names mentioned"],
       "keywords": ["searchable", "keywords", "include place names and service names"],
-      "confidence": 0.0 to 1.0
+      "confidence": 0.0 to 1.0,
+      "event_action": "create" | "update" | "merge" | null,
+      "target_event_id": null or ID number of the existing event being updated
     }
   ]
 }
+
+EVENT ACTION RULES:
+- "create" (default): This is a NEW event, not related to any existing event
+- "update": This message UPDATES an existing event (changes time, location, title, details, etc.)
+  - Set target_event_id to the ID of the event being updated
+  - Only set the fields that are CHANGING (leave others as null)
+  - Example: "change dinner to Friday 9pm" → event_action="update", target_event_id=<dinner event ID>, event_time=Friday 9pm
+  - Example: "move the meeting to conference room B" → event_action="update", target_event_id=<meeting ID>, location="conference room B"
+  - Example: "add Rahul to dinner" → event_action="update", target_event_id=<dinner ID>, participants=["Rahul"]
+- "merge": This message adds info to an existing event (same event, new details)
+  - Example: "also bring chips for the dinner" → event_action="merge", target_event_id=<dinner ID>
+
+CRITICAL: Only set event_action="update" or "merge" when the message CLEARLY references an existing event.
+If uncertain, treat as "create" — false creates are better than wrong updates.
 
 Rules:
 - Understand informal/broken English and Hinglish (Hindi+English mix)
@@ -196,6 +229,9 @@ export interface ActionResult {
   targetDescription: string; // what the user is referring to
   snoozeMinutes?: number;    // for postpone actions
   newTime?: string;          // for reschedule actions
+  newTitle?: string;         // for title update
+  newLocation?: string;      // for location update
+  newDescription?: string;   // for description update
   confidence: number;
 }
 
@@ -224,6 +260,9 @@ Return JSON:
   "targetDescription": "what the user is referring to",
   "snoozeMinutes": null or number (for postpone: 30, 60, 1440 for tomorrow, 10080 for next week),
   "newTime": null or "ISO datetime" (for reschedule),
+  "newTitle": null or "new title" (for title change),
+  "newLocation": null or "new location" (for location change),
+  "newDescription": null or "new description" (for description change),
   "confidence": 0.0 to 1.0
 }
 
@@ -237,11 +276,15 @@ RULES - Detect these as ACTIONS (isAction=true):
 - "delete it" / "remove it" / "hata do" → action=delete
 - "don't bring it up" / "I don't care" / "not interested" / "nahi chahiye" → action=ignore
 - "I already cancelled it" / "already unsubscribed" → action=complete
-- "change to 5pm" / "move to Friday" / "reschedule" → action=modify
+- "change to 5pm" / "move to Friday" / "reschedule" → action=modify, newTime=...
+- "change location to office" / "venue changed to cafe" → action=modify, newLocation=...
+- "rename it to team standup" / "actually it's a lunch not dinner" → action=modify, newTitle=...
+- "add more details: bring laptop" / "update: also need to discuss budget" → action=modify, newDescription=...
 - "postpone" / "push it" / "aage karo" → action=postpone, snoozeMinutes=1440
 - "skip it" / "chhod do" / "leave it" → action=ignore
 
 CRITICAL: If it matches an existing event from the list, use that event's keywords in targetKeywords.
+For MODIFY actions: set the specific new* field (newTime, newTitle, newLocation, newDescription) with the updated value.
 If it's a new event/task/recommendation (NOT an action), return: {"isAction": false, "action": "none", "targetKeywords": [], "targetDescription": "", "confidence": 0}`;
 
   const response = await callGemini(prompt);
@@ -255,6 +298,9 @@ If it's a new event/task/recommendation (NOT an action), return: {"isAction": fa
       targetDescription: parsed.targetDescription || '',
       snoozeMinutes: parsed.snoozeMinutes || undefined,
       newTime: parsed.newTime || undefined,
+      newTitle: parsed.newTitle || undefined,
+      newLocation: parsed.newLocation || undefined,
+      newDescription: parsed.newDescription || undefined,
       confidence: parsed.confidence || 0,
     };
   } catch {

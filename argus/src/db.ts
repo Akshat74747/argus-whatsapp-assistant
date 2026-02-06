@@ -565,6 +565,54 @@ export function updateEventTime(eventId: number, newTime: number): void {
   console.log(`📝 [DB] Event ${eventId} time updated to ${new Date(newTime * 1000).toISOString()}`);
 }
 
+// General-purpose event update (for CRUD via Gemini or API)
+// Only updates fields that are explicitly provided (non-undefined)
+export function updateEvent(eventId: number, fields: {
+  title?: string;
+  description?: string | null;
+  event_time?: number | null;
+  location?: string | null;
+  keywords?: string;
+  context_url?: string | null;
+  event_type?: string;
+  participants?: string;
+  status?: string;
+  sender_name?: string | null;
+}): boolean {
+  const event = getEventById(eventId);
+  if (!event) {
+    console.log(`❌ [DB] updateEvent: Event ${eventId} not found`);
+    return false;
+  }
+
+  const updates: string[] = [];
+  const values: any[] = [];
+
+  if (fields.title !== undefined) { updates.push('title = ?'); values.push(fields.title); }
+  if (fields.description !== undefined) { updates.push('description = ?'); values.push(fields.description); }
+  if (fields.event_time !== undefined) { updates.push('event_time = ?'); values.push(fields.event_time); }
+  if (fields.location !== undefined) { updates.push('location = ?'); values.push(fields.location); }
+  if (fields.keywords !== undefined) { updates.push('keywords = ?'); values.push(fields.keywords); }
+  if (fields.context_url !== undefined) { updates.push('context_url = ?'); values.push(fields.context_url); }
+  if (fields.event_type !== undefined) { updates.push('event_type = ?'); values.push(fields.event_type); }
+  if (fields.participants !== undefined) { updates.push('participants = ?'); values.push(fields.participants); }
+  if (fields.status !== undefined) { updates.push('status = ?'); values.push(fields.status); }
+  if (fields.sender_name !== undefined) { updates.push('sender_name = ?'); values.push(fields.sender_name); }
+
+  if (updates.length === 0) {
+    console.log(`⏭️ [DB] updateEvent: No fields to update for event ${eventId}`);
+    return false;
+  }
+
+  values.push(eventId);
+  const sql = `UPDATE events SET ${updates.join(', ')} WHERE id = ?`;
+  getDb().prepare(sql).run(...values);
+
+  const changedFields = Object.keys(fields).filter(k => (fields as any)[k] !== undefined).join(', ');
+  console.log(`📝 [DB] Event ${eventId} updated: [${changedFields}]`);
+  return true;
+}
+
 export function deleteEvent(id: number): void {
   // Delete associated triggers FIRST (foreign key constraint)
   const triggerStmt = getDb().prepare('DELETE FROM triggers WHERE event_id = ?');

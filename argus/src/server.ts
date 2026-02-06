@@ -6,7 +6,7 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-import { initDb, getStats, getEventById, closeDb, getAllMessages, getAllEvents, deleteEvent, scheduleEventReminder, dismissContextEvent, setEventContextUrl, getEventsByStatus, snoozeEvent, ignoreEvent, completeEvent as dbCompleteEvent, getEventsForDay } from './db.js';
+import { initDb, getStats, getEventById, closeDb, getAllMessages, getAllEvents, deleteEvent, scheduleEventReminder, dismissContextEvent, setEventContextUrl, getEventsByStatus, snoozeEvent, ignoreEvent, completeEvent as dbCompleteEvent, getEventsForDay, updateEvent } from './db.js';
 import { initGemini, chatWithContext, generatePopupBlueprint } from './gemini.js';
 import { processWebhook } from './ingestion.js';
 import { matchContext, extractContextFromUrl } from './matcher.js';
@@ -133,7 +133,7 @@ app.get('/api/health', async (_req: Request, res: Response) => {
     status: 'ok', 
     timestamp: new Date().toISOString(),
     model: config.geminiModel,
-    version: '1.0.0',
+    version: '2.6.1',
     evolutionDb: evolutionOk ? 'connected' : 'disconnected',
   });
 });
@@ -242,6 +242,46 @@ app.delete('/api/events/:id', (req: Request, res: Response) => {
   deleteEvent(id);
   broadcast({ type: 'event_deleted', eventId: id });
   res.json({ success: true, message: 'Event deleted' });
+});
+
+// Update event (general-purpose CRUD — title, description, location, time, keywords, etc.)
+app.patch('/api/events/:id', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id as string);
+  const event = getEventById(id);
+  
+  if (!event) {
+    res.status(404).json({ error: 'Event not found' });
+    return;
+  }
+  
+  const { title, description, event_time, location, keywords, context_url, event_type, participants, status, sender_name } = req.body;
+  
+  const fields: Record<string, any> = {};
+  if (title !== undefined) fields.title = title;
+  if (description !== undefined) fields.description = description;
+  if (event_time !== undefined) fields.event_time = event_time;
+  if (location !== undefined) fields.location = location;
+  if (keywords !== undefined) fields.keywords = keywords;
+  if (context_url !== undefined) fields.context_url = context_url;
+  if (event_type !== undefined) fields.event_type = event_type;
+  if (participants !== undefined) fields.participants = participants;
+  if (status !== undefined) fields.status = status;
+  if (sender_name !== undefined) fields.sender_name = sender_name;
+  
+  if (Object.keys(fields).length === 0) {
+    res.status(400).json({ error: 'No fields to update' });
+    return;
+  }
+  
+  const updated = updateEvent(id, fields);
+  if (updated) {
+    console.log(`📝 [PATCH] Event ${id}: "${event.title}" updated [${Object.keys(fields).join(', ')}]`);
+    broadcast({ type: 'event_updated', eventId: id, fields: Object.keys(fields) });
+    const updatedEvent = getEventById(id);
+    res.json({ success: true, event: updatedEvent });
+  } else {
+    res.status(500).json({ error: 'Failed to update event' });
+  }
 });
 
 // ============ Legacy Endpoints (for backwards compat) ============
@@ -550,6 +590,8 @@ app.post('/api/context-check', async (req: Request, res: Response) => {
     
     if (contextTriggers.length > 0) {
       // Broadcast context reminders to all clients with Gemini popup blueprints
+      // Also collect popups to include in HTTP response (for when WS was missed)
+      const contextTriggersWithPopups = [];
       for (const trigger of contextTriggers) {
         let popup;
         try {
@@ -569,7 +611,24 @@ app.post('/api/context-check', async (req: Request, res: Response) => {
           url: parsed.data.url,
           popup
         });
+        
+        contextTriggersWithPopups.push({ ...trigger, popup });
       }
+
+      // Also do keyword-based matching
+      const result = await matchContext(
+        parsed.data.url,
+        parsed.data.title,
+        config.hotWindowDays
+      );
+
+      // Return context triggers with popups in HTTP response (extension fallback)
+      res.json({
+        ...result,
+        contextTriggers: contextTriggersWithPopups,
+        contextTriggersCount: contextTriggersWithPopups.length,
+      });
+      return;
     }
 
     // Also do keyword-based matching
@@ -644,7 +703,7 @@ server.listen(config.port, () => {
 ║    ██║  ██║██║  ██║╚██████╔╝╚██████╔╝███████║            ║
 ║    ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚══════╝            ║
 ║                                                           ║
-║    Proactive Memory Assistant v1.0.0                      ║
+║    Proactive Memory Assistant v2.6.1                     ║
 ║    Model: ${config.geminiModel.padEnd(30)}        ║
 ║    Port:  ${config.port.toString().padEnd(30)}        ║
 ║                                                           ║

@@ -1,5 +1,5 @@
-// Argus Background Service Worker v2.4
-// Handles: WebSocket connection, API calls, context triggers, reminder flow, sidePanel
+// Argus Background Service Worker v2.6.1
+// Handles: WebSocket connection, API calls, context triggers, reminder flow, sidePanel, event CRUD
 // NOTE: All popups are shown via content.js overlay - NO Chrome notifications
 
 const API_BASE = 'http://localhost:3000';
@@ -132,6 +132,17 @@ async function handleWebSocketMessage(data) {
         message: data.message,
       });
       break;
+
+    case 'event_updated':
+      console.log('[Argus] Event updated:', data.eventId, data.fields);
+      await sendToFirstAvailableTab({
+        type: 'ARGUS_ACTION_TOAST',
+        action: 'update',
+        eventId: data.eventId,
+        eventTitle: '',
+        message: 'Event updated: ' + (data.fields || []).join(', '),
+      });
+      break;
   }
 }
 
@@ -224,6 +235,7 @@ async function checkCurrentUrl(url, title) {
             type: 'ARGUS_CONTEXT_REMINDER',
             event: event,
             url: url,
+            popup: event.popup || null,
           });
         }
       }
@@ -312,6 +324,15 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
         case 'DELETE_EVENT':
           console.log('[Argus] API: delete for event', message.eventId);
           return await (await fetch(API_BASE + '/api/events/' + message.eventId, { method: 'DELETE' })).json();
+
+        case 'UPDATE_EVENT':
+          console.log('[Argus] API: update for event', message.eventId, message.fields);
+          const updateRes = await fetch(API_BASE + '/api/events/' + message.eventId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(message.fields || {}),
+          });
+          return await updateRes.json();
           
         case 'OPEN_DASHBOARD':
           chrome.tabs.create({ url: 'http://localhost:3000' });
@@ -376,4 +397,4 @@ chrome.runtime.onInstalled.addListener(function() {
 });
 
 connectWebSocket();
-console.log('[Argus] Background v2.4 loaded');
+console.log('[Argus] Background v2.6.1 loaded');

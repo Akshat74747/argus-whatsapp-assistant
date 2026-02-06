@@ -1,4 +1,4 @@
-import { insertMessage, insertEvent, insertTrigger, getRecentMessages, upsertContact, checkEventConflicts, findActiveEventsByKeywords, getActiveEvents, ignoreEvent, completeEvent as dbCompleteEvent, snoozeEvent, deleteEvent, updateEventTime, findDuplicateEvent } from './db.js';
+import { insertMessage, insertEvent, insertTrigger, getRecentMessages, upsertContact, checkEventConflicts, findActiveEventsByKeywords, getActiveEvents, ignoreEvent, completeEvent as dbCompleteEvent, snoozeEvent, deleteEvent, updateEvent, findDuplicateEvent } from './db.js';
 import { extractEvents, shouldSkipMessage, detectAction } from './gemini.js';
 import type { Message, WhatsAppWebhook, TriggerType } from './types.js';
 
@@ -166,17 +166,35 @@ export async function processWebhook(
           break;
 
         case 'modify':
-          if (actionResult.newTime) {
-            try {
-              const newTime = Math.floor(new Date(actionResult.newTime).getTime() / 1000);
-              updateEventTime(eventId, newTime);
-              actionMessage = `Rescheduled: "${targetEvent.title}" → ${new Date(newTime * 1000).toLocaleString()}`;
-              console.log(`📅 [ACTION] Rescheduled event #${eventId}: "${targetEvent.title}"`);
-            } catch {
-              actionMessage = `Could not reschedule: invalid time`;
+          if (actionResult.newTime || actionResult.newTitle || actionResult.newLocation || actionResult.newDescription) {
+            const updateFields: Record<string, any> = {};
+            
+            if (actionResult.newTime) {
+              try {
+                const parsedTime = Math.floor(new Date(actionResult.newTime).getTime() / 1000);
+                if (!isNaN(parsedTime) && parsedTime > 0) {
+                  updateFields.event_time = parsedTime;
+                } else {
+                  console.log(`⚠️ [ACTION] Invalid newTime from Gemini: "${actionResult.newTime}" → NaN`);
+                }
+              } catch {
+                // invalid time, skip
+              }
+            }
+            if (actionResult.newTitle) updateFields.title = actionResult.newTitle;
+            if (actionResult.newLocation) updateFields.location = actionResult.newLocation;
+            if (actionResult.newDescription) updateFields.description = actionResult.newDescription;
+            
+            const changed = updateEvent(eventId, updateFields);
+            if (changed) {
+              const changedStr = Object.keys(updateFields).join(', ');
+              actionMessage = `Updated "${targetEvent.title}": changed ${changedStr}`;
+              console.log(`📝 [ACTION] Updated event #${eventId}: ${changedStr}`);
+            } else {
+              actionMessage = `Could not update: no valid changes`;
             }
           } else {
-            actionMessage = `Modify requested but no new time provided`;
+            actionMessage = `Modify requested but no changes specified`;
           }
           break;
 
@@ -199,8 +217,8 @@ export async function processWebhook(
     }
   }
 
-  // ============ STEP 2: Not an action → extract NEW events ============
-  const result = await processMessage(message, context, senderName);
+  // ============ STEP 2: Not an action → extract NEW events (or updates to existing) ============
+  const result = await processMessage(message, context, senderName, activeEvents);
   
   return result;
 }
@@ -208,20 +226,99 @@ export async function processWebhook(
 export async function processMessage(
   message: Message,
   context: string[] = [],
-  senderName: string | null = null
+  senderName: string | null = null,
+  existingEvents: Array<{ id?: number; title: string; event_type: string; keywords: string; event_time: number | null; location: string | null; description: string | null; sender_name?: string | null }> = []
 ): Promise<IngestionResult> {
   let eventsCreated = 0;
   let triggersCreated = 0;
   const createdEvents: CreatedEvent[] = [];
 
   try {
-    // Extract events using Gemini
-    const extraction = await extractEvents(message.content, context);
+    // Extract events using Gemini — now with existing events context for CRUD
+    const eventsForGemini = existingEvents.map(e => ({
+      id: e.id!,
+      title: e.title,
+      event_type: e.event_type,
+      keywords: e.keywords,
+      event_time: e.event_time,
+      location: e.location,
+      description: e.description,
+      sender_name: e.sender_name,
+    }));
+    const extraction = await extractEvents(message.content, context, new Date().toISOString(), eventsForGemini);
 
     for (const event of extraction.events) {
       if (event.confidence < 0.65) {
         console.log(`⏭️ Skipping low-confidence event: "${event.title}" (${event.confidence})`);
         continue;
+      }
+
+      // ============ HANDLE EVENT UPDATES (CRUD) ============
+      // If Gemini says this is an update/merge to an existing event, perform the update
+      const eventAction = (event as any).event_action || 'create';
+      const targetEventId = (event as any).target_event_id;
+
+      if ((eventAction === 'update' || eventAction === 'merge') && targetEventId) {
+        console.log(`🔄 [CRUD] ${eventAction} on event #${targetEventId}: "${event.title}"`);
+        
+        const updateFields: Record<string, any> = {};
+        if (eventAction === 'update') {
+          // Only update fields that Gemini explicitly set
+          if (event.title) updateFields.title = event.title;
+          if (event.description) updateFields.description = event.description;
+          if (event.location) updateFields.location = event.location;
+          if (event.event_time) {
+            try {
+              const parsedTime = Math.floor(new Date(event.event_time).getTime() / 1000);
+              if (!isNaN(parsedTime) && parsedTime > 0) {
+                updateFields.event_time = parsedTime;
+              }
+            } catch { /* skip invalid time */ }
+          }
+          if (event.keywords && event.keywords.length > 0) updateFields.keywords = event.keywords.join(',');
+          if (event.participants && event.participants.length > 0) updateFields.participants = JSON.stringify(event.participants);
+        } else if (eventAction === 'merge') {
+          // Merge: append to description
+          if (event.description) {
+            const existing = existingEvents.find(e => e.id === targetEventId);
+            const existingDesc = existing?.description || '';
+            updateFields.description = existingDesc ? `${existingDesc}. ${event.description}` : event.description;
+          }
+          if (event.participants && event.participants.length > 0) {
+            const existing = existingEvents.find(e => e.id === targetEventId);
+            try {
+              const existingParticipants = JSON.parse(existing?.sender_name || '[]');
+              const merged = [...new Set([...existingParticipants, ...event.participants])];
+              updateFields.participants = JSON.stringify(merged);
+            } catch {
+              updateFields.participants = JSON.stringify(event.participants);
+            }
+          }
+        }
+
+        if (Object.keys(updateFields).length > 0) {
+          const updated = updateEvent(targetEventId, updateFields);
+          if (updated) {
+            const changedStr = Object.keys(updateFields).join(', ');
+            console.log(`✅ [CRUD] Event #${targetEventId} updated: [${changedStr}]`);
+            
+            createdEvents.push({
+              id: targetEventId,
+              event_type: event.type,
+              title: event.title,
+              description: event.description,
+              event_time: updateFields.event_time || null,
+              location: event.location,
+              participants: updateFields.participants || JSON.stringify(event.participants),
+              keywords: event.keywords.join(','),
+              confidence: event.confidence,
+              context_url: null,
+              sender_name: senderName,
+            });
+            eventsCreated++; // Count as an "event processed"
+          }
+        }
+        continue; // Skip normal insert — we updated instead
       }
 
       // Deduplication: skip if a similar event already exists in last 48 hours

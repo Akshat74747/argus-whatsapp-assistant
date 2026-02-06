@@ -129,6 +129,8 @@ export const GeminiExtractionSchema = z.object({
     participants: z.array(z.string()),
     keywords: z.array(z.string()),
     confidence: z.number().min(0).max(1),
+    event_action: z.enum(['create', 'update', 'merge']).nullable().optional(),
+    target_event_id: z.number().nullable().optional(),
   })),
 });
 export type GeminiExtraction = z.infer<typeof GeminiExtractionSchema>;

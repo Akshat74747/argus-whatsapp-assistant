@@ -932,5 +932,5 @@
     return true;
   });
 
-  console.log('[Argus] Content Script v2.6 loaded — API-driven popups');
+  console.log('[Argus] Content Script v2.6.1 loaded — API-driven popups with CRUD');
 })();

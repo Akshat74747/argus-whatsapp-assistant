@@ -1,4 +1,4 @@
-// Argus Popup Script v2.2 - Fixed API calls
+// Argus Popup Script v2.6.1 - Event CRUD support
 const API = 'http://localhost:3000/api';
 
 // DOM Elements

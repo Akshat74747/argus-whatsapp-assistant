@@ -1,4 +1,4 @@
-// Argus Side Panel - AI Chat v1.0
+// Argus Side Panel - AI Chat v2.6.1
 // Provides a conversational interface to query events and interact with Argus
 
 (function() {
