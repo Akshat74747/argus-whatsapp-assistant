@@ -34,6 +34,59 @@ CRITICAL RULES:
 - Only extract events with CLEAR, SPECIFIC, ACTIONABLE intent (who/what/when/where)
 - Return valid JSON only`;
 
+// ============ DATE CONTEXT HELPER ============
+// Builds a rich, unambiguous date/time block for Gemini prompts.
+// Tells Gemini what day of the week "today" is, the message send time,
+// and pre-resolves every day name to a specific calendar date so Gemini
+// never has to guess which "Thursday" we mean.
+
+function formatDateContext(messageTimestamp?: number): string {
+  const now = new Date();
+  const msgDate = messageTimestamp ? new Date(messageTimestamp * 1000) : now;
+
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const fmtDate = (d: Date) =>
+    `${dayNames[d.getDay()]}, ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+  const fmtTime = (d: Date) =>
+    d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+  // Pre-resolve next 7 days from the message date
+  const nextDayLines: string[] = [];
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date(msgDate);
+    d.setDate(d.getDate() + i);
+    nextDayLines.push(`- "${dayNames[d.getDay()]}" → ${fmtDate(d)}`);
+  }
+
+  const tomorrow = new Date(msgDate);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dayAfter = new Date(msgDate);
+  dayAfter.setDate(dayAfter.getDate() + 2);
+
+  const endOfWeek = new Date(msgDate);
+  endOfWeek.setDate(endOfWeek.getDate() + (7 - endOfWeek.getDay()));
+
+  const endOfMonth = new Date(msgDate.getFullYear(), msgDate.getMonth() + 1, 0);
+
+  const nextWeekStart = new Date(msgDate);
+  nextWeekStart.setDate(nextWeekStart.getDate() + (8 - nextWeekStart.getDay()));
+
+  return `=== DATE/TIME CONTEXT (use this to resolve ALL relative dates) ===
+Right now      : ${fmtDate(now)}, ${fmtTime(now)}
+Message sent at: ${fmtDate(msgDate)}, ${fmtTime(msgDate)}
+Today is       : ${dayNames[now.getDay()]}
+
+Pre-resolved day-name look-up (ALWAYS use these exact dates):
+- "today" / "aaj"       → ${fmtDate(msgDate)}
+- "tomorrow" / "kal"    → ${fmtDate(tomorrow)}
+- "day after" / "parso" → ${fmtDate(dayAfter)}
+${nextDayLines.join('\n')}
+- "this week" / "end of week"   → ${fmtDate(endOfWeek)}
+- "this month" / "end of month" → ${fmtDate(endOfMonth)}
+- "next week"                   → week starting ${fmtDate(nextWeekStart)}
+===`;
+}
+
 // ============ UNIFIED MESSAGE ANALYSIS ============
 // Single Gemini call replaces old classifyMessage() + extractEvents() two-step flow.
 // Gemini handles ALL classification and extraction — no brittle keyword heuristics.
@@ -42,8 +95,9 @@ CRITICAL RULES:
 export async function analyzeMessage(
   message: string,
   context: string[] = [],
-  currentDate: string = new Date().toISOString(),
-  existingEvents: Array<{ id: number; title: string; event_type: string; keywords: string; event_time: number | null; location: string | null; description: string | null; sender_name?: string | null }> = []
+  _currentDate: string = new Date().toISOString(),
+  existingEvents: Array<{ id: number; title: string; event_type: string; keywords: string; event_time: number | null; location: string | null; description: string | null; sender_name?: string | null }> = [],
+  messageTimestamp?: number
 ): Promise<GeminiExtraction> {
   const contextBlock = context.length > 0 
     ? `\nPrevious messages in this chat (for context):\n${context.map((m, i) => `${i + 1}. "${m}"`).join('\n')}\n`
@@ -65,7 +119,7 @@ export async function analyzeMessage(
 
 IMPORTANT: If the message refers to or UPDATES an existing event (listed below), set "event_action" and "target_event_id" instead of creating a duplicate.
 
-Current date: ${currentDate}
+${formatDateContext(messageTimestamp)}
 ${contextBlock}${existingEventsBlock}
 Message to analyze:
 "${message}"
@@ -108,6 +162,16 @@ Rules:
 - "kal" = tomorrow, "aaj" = today, "parso" = day after tomorrow
 - "this week" = within 7 days, use end of week as event_time
 - Extract times like "5pm", "shaam ko" (evening), "subah" (morning)
+- Time-of-day defaults: "subah" = 9:00 AM, "dopahar" = 1:00 PM, "shaam ko" = 6:00 PM, "raat ko" = 9:00 PM
+- When a day name is mentioned without a specific time, default to 10:00 AM
+
+ABSOLUTE DATE RESOLUTION RULES (CRITICAL — READ CAREFULLY):
+- Use the pre-resolved dates from the DATE/TIME CONTEXT section above — do NOT calculate dates yourself
+- "Thursday" = the NEXT Thursday shown in the look-up table, NOT a past Thursday
+- If two messages in the SAME conversation say "Thursday 8pm" and "Thursday 8:30pm" → they mean the SAME Thursday, just different times
+- event_time MUST be in the FUTURE (after the "Message sent at" time) unless the message explicitly uses past tense
+- If your resolved date falls BEFORE "Message sent at", add 7 days to get the next occurrence
+- NEVER guess or fabricate dates — if no time reference exists, event_time MUST be null
 
 CRITICAL DATE/TIME RULE:
 - ONLY set event_time if the message EXPLICITLY mentions a date, time, or relative time reference
@@ -238,7 +302,8 @@ export interface ActionResult {
 export async function detectAction(
   message: string,
   context: string[] = [],
-  existingEvents: Array<{ id: number; title: string; event_type: string; keywords: string }> = []
+  existingEvents: Array<{ id: number; title: string; event_type: string; keywords: string }> = [],
+  messageTimestamp?: number
 ): Promise<ActionResult> {
   const eventsBlock = existingEvents.length > 0
     ? `\nUser's existing events/reminders:\n${existingEvents.map((e, i) => `[${i}] #${e.id}: "${e.title}" (type: ${e.event_type}, keywords: ${e.keywords})`).join('\n')}\n`
@@ -249,6 +314,8 @@ export async function detectAction(
     : '';
 
   const prompt = `Analyze this WhatsApp message. Is the user trying to PERFORM AN ACTION on a previously stored event/reminder/task? Or is this a NEW event?
+
+${formatDateContext(messageTimestamp)}
 ${contextBlock}${eventsBlock}
 Message: "${message}"
 
@@ -374,8 +441,7 @@ export async function chatWithContext(
   events: Array<{ id: number; title: string; description: string | null; event_type: string; event_time: number | null; location: string | null; status: string; keywords: string; sender_name?: string | null; context_url?: string | null }>,
   history: Array<{ role: string; content: string }> = []
 ): Promise<ChatResponse> {
-  const now = new Date();
-  const todayStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const dateContext = formatDateContext();
 
   const eventsBlock = events.length > 0
     ? events.map((e, i) => {
@@ -384,6 +450,7 @@ export async function chatWithContext(
           const d = new Date(e.event_time * 1000);
           timeStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
           timeStr += ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          if (d.getTime() < Date.now()) timeStr += ' [PAST]';
         }
         return `[${i}] ID#${e.id} | "${e.title}" | type: ${e.event_type} | time: ${timeStr} | location: ${e.location || 'none'} | status: ${e.status} | sender: ${e.sender_name || 'unknown'} | keywords: ${e.keywords}${e.description ? ' | desc: ' + e.description : ''}`;
       }).join('\n')
@@ -395,8 +462,7 @@ export async function chatWithContext(
 
   const prompt = `You are Argus AI, a helpful and conversational memory assistant. You have access to the user's saved events, tasks, reminders and recommendations from their WhatsApp conversations.
 
-Today's date: ${todayStr}
-Current time: ${now.toLocaleTimeString('en-US')}
+${dateContext}
 
 === USER'S EVENTS/TASKS ===
 ${eventsBlock}
@@ -407,7 +473,9 @@ User's question: "${query}"
 INSTRUCTIONS:
 - Answer naturally and conversationally, like a smart personal assistant
 - Reference specific events by name, date, sender when relevant
-- If user asks "what do I have today/this week", filter events by date
+- If user asks "what do I have today/this week", filter events by date — ONLY show FUTURE events
+- Events marked [PAST] have already occurred — mention this if the user asks about them
+- When displaying dates, always include the day of week (e.g., "Thursday, Feb 12 at 8 PM")
 - If user asks about recommendations or gifts, search through event descriptions and types
 - If user asks about a specific person (e.g., "what did Rahul say?"), filter by sender_name
 - If user asks about subscriptions, filter by event_type = "subscription"

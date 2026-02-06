@@ -2,6 +2,45 @@
 
 All notable changes to Argus will be documented in this file.
 
+## [2.6.2] - 2026-02-06
+
+### Fixed — "Smart Date Resolution"
+
+Gemini was resolving relative day names ("Thursday") to different weeks depending on when each message was processed, causing conflict detection to fail when two messages in the same conversation both said "Thursday". Root cause: Gemini only received a bare ISO date string with no day-of-week info, no message timestamp, and no rules about future-date resolution.
+
+### Added
+- **`formatDateContext()` — Rich Date Context Helper** (`gemini.ts`)
+  - Pre-resolves ALL 7 upcoming day names to specific calendar dates (e.g., `"Thursday" → Thursday, February 12, 2026`)
+  - Includes day-of-week for "today", "tomorrow"/"kal", "day after"/"parso"
+  - Shows both current server time AND message send time
+  - Pre-resolves "this week", "this month", "next week" to unambiguous dates
+  - Gemini no longer has to guess — every relative day maps to a single date
+
+- **Absolute Date Resolution Rules** in `analyzeMessage()` prompt
+  - "Use the pre-resolved dates from the DATE/TIME CONTEXT — do NOT calculate yourself"
+  - "If two messages say 'Thursday 8pm' and 'Thursday 8:30pm' → SAME Thursday"
+  - "event_time MUST be in the FUTURE unless explicitly past-tense"
+  - Hinglish time-of-day defaults: "subah"=9AM, "dopahar"=1PM, "shaam ko"=6PM, "raat ko"=9PM
+  - Day names without specific time default to 10:00 AM
+
+- **Past-date safety guard** (`ingestion.ts`)
+  - All three event_time parse sites (new events, CRUD updates, modify actions) now check for past dates
+  - If Gemini returns a date >1 hour in the past, automatically pushes forward by 7-day increments
+  - Logs `⏩ [Date Fix]` when correcting, so issues are visible in server output
+  - NaN guard added to prevent corrupt timestamps from reaching the database
+
+### Changed
+- **`analyzeMessage()`** — new `messageTimestamp` parameter; replaced bare `Current date: <ISO>` with full `formatDateContext()` block
+- **`detectAction()`** — new `messageTimestamp` parameter + date context injected into prompt (was completely missing before — "change to Friday" had no idea which Friday)
+- **`chatWithContext()`** — uses `formatDateContext()` instead of manual `todayStr`/`toLocaleTimeString`; events display now shows `[PAST]` tag for expired items; added instructions for future-only filtering and day-of-week display
+- **`processWebhook()`** — passes `message.timestamp` to `detectAction()` 
+- **`processMessage()`** — passes `message.timestamp` to `extractEvents()`
+
+### Test Results
+- "Dinner Thursday at 8pm" → Thu, Feb 12, 2026 8:00 PM ✅ (next Thursday)
+- "I'll be there Thursday at 8:30pm" → modify action on same event → Thu, Feb 12, 8:30 PM ✅ (same Thursday)
+- AI Chat: "What do I have this week?" → correctly shows "Thursday, February 12th at 8:30 PM" with day-of-week ✅
+
 ## [2.6.0] - 2026-02-06
 
 ### Architecture — "Let Gemini Do Everything"

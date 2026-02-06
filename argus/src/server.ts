@@ -703,7 +703,7 @@ server.listen(config.port, () => {
 ║    ██║  ██║██║  ██║╚██████╔╝╚██████╔╝███████║            ║
 ║    ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚══════╝            ║
 ║                                                           ║
-║    Proactive Memory Assistant v2.6.1                     ║
+║    Proactive Memory Assistant v2.6.2                     ║
 ║    Model: ${config.geminiModel.padEnd(30)}        ║
 ║    Port:  ${config.port.toString().padEnd(30)}        ║
 ║                                                           ║

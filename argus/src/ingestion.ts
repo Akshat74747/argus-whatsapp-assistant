@@ -111,7 +111,7 @@ export async function processWebhook(
     title: e.title,
     event_type: e.event_type,
     keywords: e.keywords,
-  })));
+  })), timestamp);
 
   if (actionResult.isAction && actionResult.confidence >= 0.6) {
     console.log(`🎯 [ACTION] Detected action: "${actionResult.action}" on "${actionResult.targetDescription}" (confidence: ${actionResult.confidence})`);
@@ -171,8 +171,15 @@ export async function processWebhook(
             
             if (actionResult.newTime) {
               try {
-                const parsedTime = Math.floor(new Date(actionResult.newTime).getTime() / 1000);
+                let parsedTime = Math.floor(new Date(actionResult.newTime).getTime() / 1000);
                 if (!isNaN(parsedTime) && parsedTime > 0) {
+                  // Guard: if Gemini returned a past date, push forward by weeks
+                  const nowUnix = Math.floor(Date.now() / 1000);
+                  if (parsedTime < nowUnix - 3600) {
+                    const weekSec = 7 * 24 * 3600;
+                    while (parsedTime < nowUnix) parsedTime += weekSec;
+                    console.log(`⏩ [Date Fix] Action newTime was past, moved to ${new Date(parsedTime * 1000).toISOString()}`);
+                  }
                   updateFields.event_time = parsedTime;
                 } else {
                   console.log(`⚠️ [ACTION] Invalid newTime from Gemini: "${actionResult.newTime}" → NaN`);
@@ -245,7 +252,7 @@ export async function processMessage(
       description: e.description,
       sender_name: e.sender_name,
     }));
-    const extraction = await extractEvents(message.content, context, new Date().toISOString(), eventsForGemini);
+    const extraction = await extractEvents(message.content, context, new Date().toISOString(), eventsForGemini, message.timestamp);
 
     for (const event of extraction.events) {
       if (event.confidence < 0.65) {
@@ -269,8 +276,15 @@ export async function processMessage(
           if (event.location) updateFields.location = event.location;
           if (event.event_time) {
             try {
-              const parsedTime = Math.floor(new Date(event.event_time).getTime() / 1000);
+              let parsedTime = Math.floor(new Date(event.event_time).getTime() / 1000);
               if (!isNaN(parsedTime) && parsedTime > 0) {
+                // Guard: push past dates forward
+                const nowUnix = Math.floor(Date.now() / 1000);
+                if (parsedTime < nowUnix - 3600) {
+                  const weekSec = 7 * 24 * 3600;
+                  while (parsedTime < nowUnix) parsedTime += weekSec;
+                  console.log(`\u23e9 [Date Fix] CRUD update had past date, moved to ${new Date(parsedTime * 1000).toISOString()}`);
+                }
                 updateFields.event_time = parsedTime;
               }
             } catch { /* skip invalid time */ }
@@ -333,6 +347,18 @@ export async function processMessage(
       if (event.event_time) {
         try {
           eventTime = Math.floor(new Date(event.event_time).getTime() / 1000);
+          if (isNaN(eventTime)) {
+            console.log(`\u26a0\ufe0f [Date] Invalid event_time from Gemini: "${event.event_time}" \u2192 NaN`);
+            eventTime = null;
+          } else {
+            // Guard: if Gemini returned a date in the past, push forward by weeks
+            const nowUnix = Math.floor(Date.now() / 1000);
+            if (eventTime < nowUnix - 3600) { // more than 1 hour in the past
+              const weekSec = 7 * 24 * 3600;
+              while (eventTime < nowUnix) eventTime += weekSec;
+              console.log(`\u23e9 [Date Fix] Gemini returned past date for "${event.title}", moved forward to ${new Date(eventTime * 1000).toISOString()}`);
+            }
+          }
         } catch {
           eventTime = null;
         }
