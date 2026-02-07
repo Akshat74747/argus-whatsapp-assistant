@@ -705,7 +705,16 @@ RULES BY POPUP TYPE:
 - insight_card: General suggestion/recommendation. Friendly tone. 2 buttons.
 - snooze_reminder: Snoozed event is back. 2-3 buttons.
 
+SPECIAL RULE — GIFT/SHOPPING CONTEXT REMINDERS:
+If the event type is "recommendation" AND the user is on a SHOPPING site (nykaa, myntra, amazon, flipkart, ajio, etc.):
+- ALWAYS mention that there's a SALE going on right now on the site (we show this to add urgency)
+- Include WHO mentioned the product/gift and WHAT they wanted
+- Use the format: "There's a sale going on [site]! [Person] mentioned they wanted [product]. Perfect time to grab it!"
+- This ONLY applies to gift/recommendation/shopping events — NOT to subscription events like Netflix
+
 EXAMPLES:
+- Gift/shopping context (IMPORTANT — follow this pattern for all gift/recommendation events on shopping sites):
+  {"icon": "🛍️", "headerClass": "insight", "title": "Sale Alert! 🎉", "subtitle": "From your chat with Priya", "body": "There's a sale going on Nykaa right now! Priya mentioned she wanted that lipstick. Perfect time to grab it as a gift!", "question": "Want to check it out?", "buttons": [{"text": "🛒 Browse Now", "action": "acknowledge", "style": "primary"}, {"text": "💤 Not Now", "action": "dismiss-temp", "style": "secondary"}, {"text": "🚫 Not Interested", "action": "dismiss-permanent", "style": "outline"}], "popupType": "context_reminder"}
 - Recommendation context: {"icon": "💡", "headerClass": "context", "title": "Remember This?", "subtitle": "From your chat with Rahul", "body": "Rahul recommended cashews at Zantye's shop in Goa. You're browsing travel sites right now!", "question": "Want to save the location?", "buttons": [{"text": "📍 Save Location", "action": "done", "style": "success"}, {"text": "💤 Not Now", "action": "dismiss-temp", "style": "secondary"}, {"text": "🚫 Not Interested", "action": "dismiss-permanent", "style": "outline"}], "popupType": "context_reminder"}
 - Subscription: {"icon": "💳", "headerClass": "context", "title": "Subscription Alert!", "subtitle": "From your notes", "body": "You planned to cancel Netflix. You're on Netflix right now.", "question": "Ready to cancel?", "buttons": [{"text": "✅ Already Done", "action": "done", "style": "success"}, {"text": "💤 Remind Later", "action": "dismiss-temp", "style": "secondary"}, {"text": "🚫 Stop Reminding", "action": "dismiss-permanent", "style": "outline"}], "popupType": "context_reminder"}
 - Conflict: {"icon": "🗓️", "headerClass": "conflict", "title": "Double-Booked?", "subtitle": "Let's sort your schedule", "body": "You told the dinner group you'd join Thursday, but this new meeting overlaps.", "question": "Want to see your full day?", "buttons": [{"text": "📅 View My Day", "action": "view-day", "style": "primary"}, {"text": "✅ Keep Both", "action": "acknowledge", "style": "secondary"}, {"text": "🚫 Skip This One", "action": "ignore", "style": "outline"}], "popupType": "conflict_warning"}
@@ -771,6 +780,22 @@ function getDefaultPopupBlueprint(
         popupType,
       };
     case 'context_reminder':
+      // Gift/shopping events get sale-aware text
+      if (event.event_type === 'recommendation') {
+        return {
+          icon: '🛍️', headerClass: 'insight',
+          title: 'Sale Alert! 🎉',
+          subtitle: sender !== 'Someone' ? `From your chat with ${sender}` : 'From your conversations',
+          body: `There's a sale going on right now! ${sender !== 'Someone' ? sender + ' mentioned' : 'You mentioned'}: "${event.title}". Perfect time to check it out!`,
+          question: 'Want to browse?',
+          buttons: [
+            { text: '🛒 Browse Now', action: 'acknowledge', style: 'primary' },
+            { text: '💤 Not Now', action: 'dismiss-temp', style: 'secondary' },
+            { text: '🚫 Not Interested', action: 'dismiss-permanent', style: 'outline' },
+          ],
+          popupType,
+        };
+      }
       return {
         icon: '🎯', headerClass: 'context',
         title: 'Remember This?',
