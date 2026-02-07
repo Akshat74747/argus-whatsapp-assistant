@@ -435,6 +435,33 @@ export async function processMessage(
         }
       }
       
+      // For gifts/shopping: map product categories to shopping site keywords
+      // so that visiting nykaa/myntra/amazon triggers the reminder
+      if (!contextUrl && event.type === 'recommendation') {
+        const shoppingText = `${event.keywords.join(' ')} ${event.title} ${event.description || ''}`.toLowerCase();
+        
+        // Beauty/makeup → nykaa
+        const beautyKeywords = ['makeup', 'beauty', 'cosmetic', 'skincare', 'lipstick', 'foundation', 'perfume', 'fragrance', 'nykaa'];
+        const fashionKeywords = ['sneakers', 'shoes', 'clothes', 'dress', 'fashion', 'shirt', 'jeans', 'kurta', 'saree', 'myntra', 'nike', 'adidas', 'puma'];
+        const giftKeywords = ['gift', 'birthday', 'anniversary', 'present'];
+        
+        const isBeauty = beautyKeywords.some(k => shoppingText.includes(k));
+        const isFashion = fashionKeywords.some(k => shoppingText.includes(k));
+        const isGift = giftKeywords.some(k => shoppingText.includes(k));
+        
+        if (isBeauty) {
+          contextUrl = 'nykaa';
+          console.log(`[Ingestion] Gift/beauty intent → context_url="nykaa" for "${event.title}"`);
+        } else if (isFashion) {
+          contextUrl = 'myntra';
+          console.log(`[Ingestion] Gift/fashion intent → context_url="myntra" for "${event.title}"`);
+        } else if (isGift) {
+          // General gift → amazon (broadest match)
+          contextUrl = 'amazon';
+          console.log(`[Ingestion] Gift/general intent → context_url="amazon" for "${event.title}"`);
+        }
+      }
+
       // For any event mentioning a location, also try to set context_url
       if (!contextUrl && event.location) {
         const locationLower = event.location.toLowerCase();

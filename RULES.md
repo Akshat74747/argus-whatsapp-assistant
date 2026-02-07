@@ -90,6 +90,8 @@ postgres:16-alpine          # Evolution DB
 | /api/events/:id/dismiss | POST | Dismiss notification |
 | /api/events/:id/acknowledge | POST | Acknowledge reminder |
 | /api/events/:id | DELETE | Delete event permanently |
+| /api/events/:id | PATCH | Update event fields (CRUD) |
+| /api/events/:id/confirm-update | POST | Confirm a pending modify action |
 | /api/events/day/:timestamp | GET | Get all events for a day (reschedule view) |
 | /api/webhook/whatsapp | POST | WhatsApp webhook |
 | /api/context-check | POST | Check URL context |
@@ -99,7 +101,7 @@ postgres:16-alpine          # Evolution DB
 ## Chrome Extension Components
 - **manifest.json** - Manifest V3, sidePanel permission, no `"type": "module"` in background
 - **background.js** - Service worker: WebSocket, API calls, sidePanel handler
-- **content.js** - Dynamic popups overlay (5 types), toast notifications
+- **content.js** - Dynamic popups overlay (7 types: discovery, reminder, context, conflict, insight, snooze, update_confirm), toast notifications
 - **sidepanel.html/js** - AI Chat sidebar with markdown rendering
 - **popup.html/js** - Extension popup with event cards and stats
 

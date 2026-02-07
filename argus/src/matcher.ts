@@ -15,8 +15,14 @@ const URL_PATTERNS: Array<{ pattern: RegExp; activity: string; keywords: (match:
   // Shopping
   { pattern: /amazon\.(com|in).*\/s\?.*k=([^&]+)/i, activity: 'shopping_search', keywords: m => [decodeURIComponent(m[2]).replace(/\+/g, ' ')] },
   { pattern: /amazon\.(com|in).*\/dp\/\w+/i, activity: 'shopping_product', keywords: () => [] },
+  { pattern: /amazon\.(com|in)/i, activity: 'shopping', keywords: () => ['amazon', 'shopping', 'gift', 'buy'] },
   { pattern: /flipkart\.com.*\/search\?q=([^&]+)/i, activity: 'shopping_search', keywords: m => [decodeURIComponent(m[1])] },
+  { pattern: /flipkart\.com/i, activity: 'shopping', keywords: () => ['flipkart', 'shopping', 'gift', 'buy'] },
   { pattern: /myntra\.com.*\/(.*)$/i, activity: 'fashion_shopping', keywords: m => extractUrlKeywords(m[1]) },
+  { pattern: /myntra\.com/i, activity: 'fashion_shopping', keywords: () => ['myntra', 'fashion', 'shoes', 'sneakers', 'clothes', 'gift'] },
+  { pattern: /nykaa\.com/i, activity: 'beauty_shopping', keywords: () => ['nykaa', 'beauty', 'makeup', 'cosmetics', 'skincare', 'gift'] },
+  { pattern: /ajio\.com/i, activity: 'fashion_shopping', keywords: () => ['ajio', 'fashion', 'clothes', 'shoes', 'gift'] },
+  { pattern: /tatacliq\.com/i, activity: 'shopping', keywords: () => ['tatacliq', 'shopping', 'electronics', 'fashion', 'gift'] },
   
   // Subscriptions
   { pattern: /netflix\.com/i, activity: 'streaming', keywords: () => ['netflix', 'subscription', 'streaming'] },

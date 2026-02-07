@@ -195,6 +195,24 @@ CRITICAL DATE/TIME RULE:
   - keywords = include the place name and any products/shops mentioned
   - Example: "Rahul recommended cashews at Zantye's in Goa" → type=recommendation, location=goa, keywords=[goa, cashews, zantyes, rahul]
 
+- For GIFTS / SHOPPING INTENT (buying something for someone):
+  - type = "recommendation"
+  - If the conversation mentions a PRODUCT CATEGORY (makeup, sneakers, perfume, clothes, electronics, etc.) and a PERSON (sister, mom, friend name, girlfriend, etc.), extract it
+  - keywords MUST include the product category AND shopping site hints for URL-based triggering
+  - If the recipient is female (sister, mom, girlfriend, bhabhi, didi, wife, "uske liye") → add "beauty", "makeup", "nykaa", "myntra" to keywords
+  - If the recipient is male (brother, dad, boyfriend, bhai) → add "electronics", "gadgets", "amazon", "flipkart" to keywords
+  - If gender is unknown or product is general → add "amazon", "flipkart", "myntra" to keywords
+  - location = null (no specific place — this is URL-triggered, NOT location-based)
+  - event_time = null unless a specific date like "birthday next month" or "anniversary on 15th" is mentioned
+  - participants = include the recipient's name or relationship
+  - confidence = 0.8+ for clear gift/shopping intent
+  - Examples:
+    - "Need to get makeup for sis birthday" → type=recommendation, title="Gift for sister - makeup", keywords=[makeup, beauty, gift, birthday, sister, nykaa, myntra], participants=["sister"], event_time=null, confidence=0.85
+    - "Priya loves those Nike shoes" → type=recommendation, title="Gift idea - Nike shoes for Priya", keywords=[nike, shoes, sneakers, gift, priya, myntra, amazon], participants=["Priya"], event_time=null, confidence=0.8
+    - "Get something nice for mom" → type=recommendation, title="Gift for Mom", keywords=[gift, mom, mother, beauty, nykaa, myntra, amazon], participants=["mom"], event_time=null, confidence=0.8
+    - "bhai ko kuch lena hai birthday pe" → type=recommendation, title="Birthday gift for brother", keywords=[gift, birthday, brother, electronics, amazon, flipkart], participants=["brother"], event_time=null, confidence=0.8
+    - "need to buy lipstick" → type=recommendation, title="Buy lipstick", keywords=[lipstick, makeup, beauty, nykaa, myntra, gift], event_time=null, confidence=0.8
+
 - For MEETINGS and INFORMAL COMMITMENTS:
   - IMPORTANT: Questions like "Can we meet at 5pm?" or "Dinner Thursday?" ARE events!
   - Informal commitments like "I'll be there Thursday" or "See you at dinner" ARE events
@@ -233,6 +251,9 @@ ONLY extract events that have CLEAR, SPECIFIC, ACTIONABLE intent:
 - ✅ "Meeting tomorrow at 5pm" — specific event with time
 - ✅ "Dinner Thursday at 8" — specific commitment with day/time
 - ✅ "Need to pay rent by 15th" — clear deadline
+- ✅ "Need makeup for sis birthday" — gift intent with recipient + product category
+- ✅ "Priya loved those Nike shoes" — gift idea, specific product + person
+- ✅ "bhai ko kuch lena hai" — shopping intent in Hinglish
 - ❌ "I will start robotics man" — vague, no time, no specifics
 - ❌ "Complete restosmem broo" — dev chat / status update
 - ❌ "Send payment via UPI" — vague, no amount/to whom/when

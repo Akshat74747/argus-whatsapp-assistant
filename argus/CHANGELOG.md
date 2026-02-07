@@ -2,6 +2,44 @@
 
 All notable changes to Argus will be documented in this file.
 
+## [2.6.4] - 2026-02-07
+
+### Added — "Gift Intent" Scenario (E-commerce URL Triggers)
+
+When a user mentions buying something (makeup, sneakers, gifts) for someone in a WhatsApp chat, Argus now creates a URL-triggered event that fires when the user visits shopping sites like Nykaa, Myntra, Amazon, etc. No time trigger needed — purely context-based.
+
+### Added
+- **Gift/Shopping Extraction Rules** in `analyzeMessage()` prompt (`gemini.ts`)
+  - New section: "GIFTS / SHOPPING INTENT" with detailed extraction rules
+  - Female recipients (sister, mom, girlfriend, didi, bhabhi, wife) → keywords auto-include `nykaa`, `myntra`, `beauty`
+  - Male recipients (brother, dad, boyfriend, bhai) → keywords auto-include `amazon`, `flipkart`, `electronics`
+  - General/unknown → keywords include `amazon`, `flipkart`, `myntra`
+  - 5 worked examples covering English, Hinglish, and implicit gift intent
+  - Gift examples added to ✅/❌ intent list
+
+- **Shopping Context URL Mapping** (`ingestion.ts`)
+  - New block after travel keywords: maps product categories to shopping site context URLs
+  - Beauty keywords (makeup, lipstick, skincare, perfume, cosmetic, fragrance) → `context_url = "nykaa"`
+  - Fashion keywords (sneakers, shoes, clothes, dress, nike, adidas, puma) → `context_url = "myntra"`
+  - General gift keywords (gift, birthday, anniversary, present) → `context_url = "amazon"`
+  - Events auto-set to `status: 'scheduled'` (URL-triggered, no time needed)
+
+- **Shopping Site URL Patterns** (`matcher.ts`)
+  - `nykaa.com` → `beauty_shopping` activity with keywords: nykaa, beauty, makeup, cosmetics, skincare, gift
+  - `ajio.com` → `fashion_shopping` activity
+  - `tatacliq.com` → general shopping activity
+  - Catch-all patterns for `amazon.in`, `flipkart.com`, `myntra.com` (previously only matched search/product URLs)
+
+### Flow
+```
+Chat: "need makeup for sis birthday"
+  → Gemini extracts: type=recommendation, keywords=[makeup, beauty, nykaa, myntra, sister, gift, birthday]
+  → ingestion.ts: beautyKeywords match → context_url="nykaa", status=scheduled
+  → User opens nykaa.com
+  → extension polls /api/context-check → DB matches context_url="nykaa" in URL
+  → context_reminder popup: "You mentioned getting makeup for your sister. You're on Nykaa!"
+```
+
 ## [2.6.3] - 2026-02-06
 
 ### Fixed — "URL Noise & Modify Confirmation"
