@@ -978,9 +978,11 @@
   function extractCarModel(text) {
     if (!text || text.length < 3) return null;
     // Match patterns like "Honda Civic 2022", "Maruti Swift 2020", "Hyundai i20 2019"
-    const carPattern = /\b(honda|toyota|maruti|suzuki|hyundai|tata|mahindra|kia|mg|skoda|volkswagen|bmw|audi|mercedes|ford|chevrolet|renault|nissan|fiat|jeep)\s+([a-z0-9]+(?:\s+[a-z0-9]+)?)\s*(20[0-9]{2})?\b/i;
+    // Model tokens must start with a letter so "2020" isn't eaten as part of the model name
+    const carPattern = /\b(honda|toyota|maruti|suzuki|hyundai|tata|mahindra|kia|mg|skoda|volkswagen|bmw|audi|mercedes|ford|chevrolet|renault|nissan|fiat|jeep)\s+([a-z][a-z0-9]*(?:\s+[a-z][a-z0-9]*)?)\s*(20[0-9]{2})?\b/i;
     const match = text.match(carPattern);
     if (match) {
+      console.log('[Argus] 🚗 Parsed car:', JSON.stringify({ make: match[1], model: match[2], year: match[3] || null }));
       return {
         make: match[1].trim(),
         model: match[2].trim(),
