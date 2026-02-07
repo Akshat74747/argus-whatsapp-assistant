@@ -1,20 +1,23 @@
-# Argus - WhatsApp Memory Assistant
+# Argus — WhatsApp Memory Assistant
 
 > AI-powered proactive memory assistant that learns from your WhatsApp conversations and reminds you about relevant events while browsing.
 
 [![License](https://img.shields.io/badge/license-Private-red.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-22%2B-brightgreen.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://docker.com)
 
 ## 🎯 What is Argus?
 
 Argus is a smart assistant that:
 - 📱 **Monitors your WhatsApp** messages via Evolution API
-- 🧠 **Extracts events** using Gemini AI (meetings, deadlines, reminders)
+- 🧠 **Extracts events** using Gemini AI (meetings, deadlines, reminders, shopping, subscriptions)
 - 🔔 **Pushes notifications** to your browser in real-time via WebSocket
 - 🎨 **Shows modal overlays** on any browser tab when events are detected
-- 🔍 **Matches context** by analyzing URLs you visit
+- 🔍 **Matches context** by analyzing URLs you visit + DOM form fields
 - ⏰ **Triggers reminders** at the right time and place
+- 🛒 **Gift Intent** — "buy lipstick for sis" → popup on Nykaa with sale info
+- 🏥 **Insurance Accuracy** — detects car model mismatch on insurance forms via DOM watching
 
 **Example:** Your friend texts "Let's meet at 3pm tomorrow at Starbucks". Argus:
 1. Detects the event using Gemini
@@ -22,270 +25,303 @@ Argus is a smart assistant that:
 3. Shows a beautiful modal overlay with Accept/Dismiss actions
 4. Later, when you visit Google Maps or Starbucks website, reminds you again
 
+**Example:** You type "Honda Civic 2022" on an insurance site, but your WhatsApp chats say you own a 2018 model. Argus:
+1. Detects the form input via DOM watcher
+2. Cross-references with your WhatsApp memory
+3. Shows a popup: "Hold on — you own a Honda Civic 2018! You might be overpaying!"
+4. "✏️ Fix It" button auto-fills the correct value
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Node.js 22+
-- Docker & Docker Compose
+- Docker & Docker Compose (required)
 - Chrome browser
-- Gemini API key
+- Gemini API key ([get one here](https://aistudio.google.com/apikey))
 
-### Installation
+### Docker Deployment (Recommended)
 
 ```bash
 # Clone the repository
 git clone https://github.com/nityam2007/argus-whatsapp-assistant.git
-cd argus-whatsapp-assistant
-
-# Install dependencies
-cd argus
-npm install
+cd argus-whatsapp-assistant/argus
 
 # Configure environment
 cp .env.example .env
-# Edit .env and add your GEMINI_API_KEY
+# Edit .env → add your GEMINI_API_KEY (required)
 
-# Start all services (Argus + Evolution API + PostgreSQL)
-docker-compose up -d
+# Build & start all 4 containers
+docker compose up -d --build
 
-# Or run Argus standalone
-npm run dev
+# Check status
+docker compose ps
+
+# View logs
+docker compose logs -f argus
+docker compose logs -f evolution-api
 ```
+
+### What gets started (4 containers)
+
+| Container | Image | Port | Purpose |
+|-----------|-------|------|---------|
+| `argus-server` | argus (built from source) | 3000 | Main app — Express + WebSocket + Gemini AI |
+| `argus-evolution` | evolution-api (built from source) | 8080 | WhatsApp bridge — QR login, message relay |
+| `argus-postgres` | postgres:16-alpine | 5432 | Evolution API database |
+| `argus-redis` | redis:7-alpine | 6379 | Evolution API cache |
 
 ### Load Chrome Extension
 
 1. Open `chrome://extensions/`
-2. Enable "Developer mode"
-3. Click "Load unpacked"
+2. Enable **Developer mode** (top right toggle)
+3. Click **Load unpacked**
 4. Select the `argus/extension/` folder
+5. Pin the Argus extension to your toolbar
 
-### Configure Evolution API
+### Connect WhatsApp
 
-1. Access Evolution API at `http://localhost:8080`
-2. Create a WhatsApp instance named "arguas"
-3. Connect your WhatsApp by scanning QR code
-4. Set webhook URL: `http://localhost:3000/api/webhook/whatsapp`
+1. Open `http://localhost:8080` (Evolution API)
+2. Create instance named `arguas` with API key `rmd_evolution_api_key_12345`
+3. Scan QR code with your WhatsApp
+4. Set webhook URL: `http://argus:3000/api/webhook/whatsapp` (Docker) or `http://localhost:3000/api/webhook/whatsapp` (dev)
+
+### Local Development (without Docker)
+
+```bash
+cd argus
+npm install
+cp .env.example .env    # Fill in GEMINI_API_KEY
+npm run dev             # Start with hot reload
+```
 
 ## 📁 Project Structure
 
 ```
 whatsapp-chat-rmd-argus/
-├── argus/                    # Main application
+├── argus/                      # Main application
 │   ├── src/
-│   │   ├── server.ts        # Express + WebSocket server
-│   │   ├── db.ts            # SQLite database
-│   │   ├── evolution-db.ts  # PostgreSQL Evolution DB integration
-│   │   ├── gemini.ts        # Gemini AI integration
-│   │   ├── ingestion.ts     # Message processing pipeline
-│   │   ├── matcher.ts       # URL context matching
-│   │   └── scheduler.ts     # Time-based triggers
-│   ├── extension/           # Chrome Extension (Manifest V3)
-│   │   ├── background.js    # WebSocket client, URL detection
-│   │   ├── content.js       # Modal overlay injection
-│   │   └── manifest.json    # Extension config
-│   ├── tests/               # Vitest test suite
-│   └── docker-compose.yml   # Full stack deployment
-├── evolution-api/           # WhatsApp API (submodule/separate)
-├── RULES.md                 # Development rules
-└── README.md               # This file
+│   │   ├── server.ts           # Express + WebSocket server
+│   │   ├── db.ts               # SQLite + FTS5 database
+│   │   ├── evolution-db.ts     # PostgreSQL Evolution DB integration
+│   │   ├── gemini.ts           # Gemini AI — extraction, popup blueprints, chat
+│   │   ├── ingestion.ts        # Message processing + action detection pipeline
+│   │   ├── matcher.ts          # URL pattern matching for context triggers
+│   │   ├── scheduler.ts        # Time-based + snooze reminders
+│   │   └── types.ts            # TypeScript types + config
+│   ├── extension/              # Chrome Extension (Manifest V3)
+│   │   ├── background.js       # WebSocket client, URL detection, context check
+│   │   ├── content.js          # Modal overlays, toasts, DOM form watcher
+│   │   ├── sidepanel.html/js   # AI Chat sidebar with markdown rendering
+│   │   ├── popup.html/js       # Extension popup with event cards + stats
+│   │   └── manifest.json       # Extension config — <all_urls> matching
+│   ├── tests/                  # Vitest test suite
+│   ├── Dockerfile              # Multi-stage Node 22 Alpine build
+│   ├── docker-compose.yml      # Full stack — 4 containers
+│   └── .env.example            # Environment template
+├── evolution-api/              # WhatsApp API (forked, built from source)
+│   ├── Dockerfile              # Multi-stage Node 24 Alpine build
+│   └── ...                     # Evolution API source
+├── Insurance website/          # Demo ACKO clone for insurance scenario
+├── RULES.md                    # Development rules & constraints
+└── README.md                   # This file
 ```
 
 ## ✨ Features
 
-### Real-Time Event Broadcasting
-- WebSocket connection pushes events instantly to browser
-- No polling - zero delay notifications
-- Automatic reconnection with exponential backoff
+### 8 Popup Types
 
-### Modal Overlay Notifications
-- Centered, beautiful modal popup (like survey overlays)
-- Gradient header with event icon
-- 5 popup types: discovery, reminder, context, conflict, insight
-- Accept/Dismiss/Set Reminder action buttons
-- Context reminders persist until user acts
+| Type | Icon | When |
+|------|------|------|
+| `event_discovery` | 📅 💡 💳 | New event detected in WhatsApp |
+| `event_reminder` | ⏰ | Scheduled time arrives |
+| `context_reminder` | 🎯 💡 💳 | User visits relevant URL |
+| `conflict_warning` | 🗓️ | Overlapping events detected |
+| `insight_card` | 💡 | AI suggestion from conversations |
+| `snooze_reminder` | ⏰ | Snoozed event fires again |
+| `update_confirm` | 📝 | Message suggests event changes |
+| `form_mismatch` | ⚠️ | DOM form field contradicts WhatsApp memory |
+
+### Real-Time Event Broadcasting
+- WebSocket pushes events instantly — zero polling
+- Automatic reconnection with exponential backoff
+- Gemini-generated popup blueprints (server sends complete UI spec)
 
 ### Context-Aware Triggers
 - **Subscriptions:** "cancel netflix" → triggers on netflix.com
-- **Travel:** "cashews in goa" → triggers on any goa URL
-- **Conflicts:** overlapping events → shows warning popup
+- **Travel:** "cashews in goa" → triggers on goa-related URLs
+- **Shopping/Gifts:** "buy lipstick for sis" → triggers on nykaa.com with "sale going on" text
+- **Insurance:** "Honda Civic 2022" typed on ACKO → mismatch popup with "Fix It" button
+- **Conflicts:** overlapping events → shows warning with "View My Day" schedule
+
+### DOM Form Watcher (Insurance Accuracy)
+- Detects insurance-like pages (ACKO, PolicyBazaar, Digit, etc.)
+- Monitors text inputs with 1.5s debounce
+- Parses car make/model/year via regex
+- Cross-references with WhatsApp chat memory
+- "✏️ Fix It" button auto-fills correct value + green highlight
+
+### Gift Intent (Shopping Triggers)
+- Detects shopping intent in WhatsApp ("buy makeup for sis birthday")
+- Auto-maps to shopping URLs (beauty→Nykaa, fashion→Myntra, gifts→Amazon)
+- Sale-aware popup text for recommendations
+
+### Smart Event Processing
+- Gemini-powered extraction with multi-interval alerts
+- Spam filter (forwards, status updates, media-only)
+- Duplicate detection (48h window)
+- Action detection: cancel, complete, modify, postpone, ignore
+- Smart date resolution (relative → absolute timestamps)
+- Event CRUD with confirmation popups
 
 ### Direct Evolution DB Integration
 - Query WhatsApp messages directly from PostgreSQL
 - JSONB extraction for message content
-- Instance name to UUID auto-resolution
+- Instance name → UUID auto-resolution
 - 43,000+ message search in <10ms
 
-### Smart Context Matching
-- URL keyword extraction
-- Cascading SQL queries with FTS5
-- Location/keyword trigger detection
-- 90-day hot window optimization
+## 📡 API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/health` | GET | Health check with DB status |
+| `/api/stats` | GET | Message/event statistics |
+| `/api/events` | GET | List events (filter by status) |
+| `/api/events/:id` | PATCH | Update event fields (CRUD) |
+| `/api/events/:id` | DELETE | Delete event permanently |
+| `/api/events/:id/set-reminder` | POST | Schedule event |
+| `/api/events/:id/snooze` | POST | Snooze for X minutes |
+| `/api/events/:id/ignore` | POST | Ignore event |
+| `/api/events/:id/complete` | POST | Mark done |
+| `/api/events/:id/dismiss` | POST | Dismiss notification |
+| `/api/events/:id/acknowledge` | POST | Acknowledge reminder |
+| `/api/events/:id/confirm-update` | POST | Confirm pending modify |
+| `/api/events/day/:timestamp` | GET | Get all events for a day |
+| `/api/webhook/whatsapp` | POST | Evolution API webhook |
+| `/api/context-check` | POST | Check URL for relevant events |
+| `/api/extract-context` | POST | Extract context from URL |
+| `/api/form-check` | POST | Check form field mismatch (insurance) |
+| `/api/chat` | POST | AI Chat — context-aware conversation |
+| `/ws` | WS | Real-time notifications |
+
+## 🐳 Docker
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Docker Compose Network                     │
+│                                                               │
+│  ┌──────────────┐    ┌──────────────────┐                    │
+│  │   postgres    │    │      redis       │                    │
+│  │  :5432        │    │     :6379        │                    │
+│  └──────┬───────┘    └────────┬─────────┘                    │
+│         │                     │                               │
+│         ▼                     ▼                               │
+│  ┌──────────────────────────────────────┐                    │
+│  │         evolution-api :8080          │ ◄── WhatsApp QR    │
+│  │    WhatsApp Bridge (Node 24)        │                     │
+│  └──────────────┬───────────────────────┘                    │
+│                 │ webhook + direct PG read                    │
+│                 ▼                                             │
+│  ┌──────────────────────────────────────┐                    │
+│  │           argus :3000                │ ◄── Chrome Ext     │
+│  │   Express + WebSocket + Gemini AI   │                     │
+│  │   SQLite + FTS5 (internal)          │                     │
+│  └──────────────────────────────────────┘                    │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Commands
+
+```bash
+cd argus
+
+# Build & start everything
+docker compose up -d --build
+
+# View logs (all or specific)
+docker compose logs -f
+docker compose logs -f argus
+
+# Stop
+docker compose down
+
+# Stop + delete volumes (reset data)
+docker compose down -v
+
+# Rebuild after code changes
+docker compose build argus
+docker compose up -d argus
+```
+
+### Cross-Platform Notes
+- **Linux:** Works out of the box
+- **Windows:** Requires Docker Desktop with WSL2 backend
+- **macOS:** Requires Docker Desktop; `host.docker.internal` used for host access
 
 ## 🔧 Development
 
 ```bash
 cd argus
 
-# Development with hot reload
-npm run dev
-
-# Run tests (fast, ~2s)
-npm test
-
-# Lint & format
-npm run lint
-npm run format
-
-# Type checking
-npm run typecheck
-
-# Production build
-npm run build
-npm start
-```
-
-## 📡 API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check with DB status |
-| `/api/stats` | GET | Message/event statistics |
-| `/api/events` | GET | List events (pending/completed/all) |
-| `/api/events/:id` | GET | Get single event details |
-| `/api/events/:id/complete` | POST | Mark event as completed |
-| `/api/events/:id` | DELETE | Delete event |
-| `/api/webhook/whatsapp` | POST | Evolution API webhook receiver |
-| `/api/context-check` | POST | Check URL for relevant events |
-| `/api/whatsapp/messages` | GET | Query WhatsApp messages |
-| `/api/whatsapp/stats` | GET | WhatsApp statistics |
-| `/ws` | WebSocket | Real-time event notifications |
-
-## 🐳 Docker Deployment
-
-The project uses pre-built Docker images for fast deployment:
-
-```yaml
-services:
-  argus:              # Main application (Node 22 Alpine)
-  evolution-api:      # WhatsApp bridge (atendai/evolution-api:v2.1.1)
-  evolution-postgres: # Database (Postgres 16 Alpine)
-```
-
-```bash
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f argus
-
-# Restart Argus
-docker-compose restart argus
-
-# Stop all
-docker-compose down
+npm run dev          # Start with hot reload
+npm test             # Fast tests (~2s)
+npm run build        # Build TypeScript
+npm run typecheck    # Type check only
+npm run lint         # Lint code
+npm run format       # Format code
 ```
 
 ## 📊 Performance
 
-- **Message ingestion:** <500ms (Gemini extraction included)
-- **Context check:** <800ms (FTS5 search + matching)
-- **Database query:** <10ms (50k messages indexed)
-- **Memory usage:** <200MB (includes SQLite + Node runtime)
-- **WebSocket latency:** <50ms (event → browser overlay)
-- **Storage:** ~40MB for 50k messages
+| Metric | Value |
+|--------|-------|
+| Message ingestion | <500ms (Gemini extraction included) |
+| Context check | <800ms (FTS5 search + matching) |
+| Database query | <10ms (50k messages indexed) |
+| Memory usage | <200MB (SQLite + Node runtime) |
+| WebSocket latency | <50ms (event → browser overlay) |
+| Form mismatch check | <100ms (regex parse + DB search) |
+| Docker image size | ~180MB (Argus), ~600MB (Evolution) |
 
-## 🧪 Testing
+## 🏗️ Tech Stack
 
-Fast test suite with Vitest:
-
-```bash
-npm test              # Run all tests (~2s)
-npm run test:watch    # Watch mode
-npm run test:coverage # With coverage report
-```
-
-Tests use:
-- In-memory SQLite (no disk I/O)
-- Single fork pool (parallel execution)
-- Dot reporter (minimal output)
-- Cached dependencies
-
-## 🏗️ Architecture
-
-### Tech Stack
 - **Runtime:** Node.js 22 (ESM)
 - **Language:** TypeScript 5.7
-- **Database:** SQLite 3 with FTS5 full-text search
+- **Database:** SQLite 3 + FTS5 full-text search
 - **AI:** Google Gemini 3 Flash Preview
-- **WhatsApp:** Evolution API v2.1.1
+- **WhatsApp:** Evolution API (built from source)
 - **Evolution DB:** PostgreSQL 16
+- **Cache:** Redis 7
 - **Browser:** Chrome Extension (Manifest V3)
 - **Real-time:** WebSocket (ws library)
+- **Containers:** Docker Compose (4 services)
 - **Testing:** Vitest
-
-### Key Design Decisions
-
-✅ **SQLite FTS5 instead of vector embeddings**
-- No FAISS/pgvector complexity
-- Sub-10ms full-text search on 50k messages
-- Zero external dependencies
-
-✅ **Gemini only (no OpenAI)**
-- Per hackathon requirements
-- Cost-effective for extraction tasks
-- Fast response times
-
-✅ **Single container per user**
-- Simplified deployment
-- Easy scaling horizontally
-- Isolated data/state
-
-✅ **90-day hot window**
-- Balance between relevance and performance
-- Automatic cleanup of old data
-- Configurable via environment
-
-✅ **URL detection only (no DOM reading)**
-- MVP scope - fast implementation
-- Privacy-friendly
-- Low overhead
 
 ## 📝 Changelog
 
-See [CHANGELOG.md](argus/CHANGELOG.md) for version history.
+See [CHANGELOG.md](argus/CHANGELOG.md) for full version history.
 
-### Latest: v2.2.0 (2026-02-05)
+### Latest: v2.6.5 (2026-02-07)
 
-**Scenarios Working:**
-- ✅ Netflix Subscription - cancel reminder on netflix.com
-- ✅ Goa Cashew - travel recommendations on goa URLs
-- ✅ Calendar Conflict - overlapping event warnings
-
-**Added:**
-- Calendar conflict detection (±1 hour window)
-- Travel/location context extraction (goa, mumbai, delhi)
-- Service name extraction for subscriptions (netflix, hotstar)
-
-**Fixed:**
-- URL matching now case-insensitive
-- context_url uses keywords not full domains
-- All popups show as in-page overlays (no Chrome notifications)
-
-## 🤝 Contributing
-
-This is a private project. For collaboration inquiries, contact the maintainer.
+**All Demo Scenarios Working:**
+- ✅ Goa Cashew — travel recommendation → URL context trigger
+- ✅ Gift Intent — "buy lipstick for sis" → Nykaa popup with sale text
+- ✅ Insurance Accuracy — DOM form mismatch detection + Fix It button
+- ✅ Netflix Subscription — cancel reminder on netflix.com
+- ✅ Calendar Conflict — overlapping event warnings + View My Day
 
 ## 📄 License
 
-Private - All rights reserved
+Private — All rights reserved
 
 ## 🙏 Acknowledgments
 
-- [Evolution API](https://github.com/EvolutionAPI/evolution-api) - WhatsApp integration
-- [Google Gemini](https://ai.google.dev/) - AI event extraction
-- [SQLite FTS5](https://www.sqlite.org/fts5.html) - Full-text search
-- Chrome Extension Manifest V3 - Browser integration
+- [Evolution API](https://github.com/EvolutionAPI/evolution-api) — WhatsApp integration
+- [Google Gemini](https://ai.google.dev/) — AI event extraction
+- [SQLite FTS5](https://www.sqlite.org/fts5.html) — Full-text search
+- Chrome Extension Manifest V3 — Browser integration
 
 ---
 

@@ -1,18 +1,62 @@
-# Argus - Proactive Memory Assistant
+# Argus — Proactive Memory Assistant v2.6.5
 
-AI-powered WhatsApp assistant that learns from your conversations and reminds you about relevant events while browsing.
+AI-powered WhatsApp assistant that learns from your conversations, detects events, and reminds you at the right moment — while you browse.
 
 ## 🚀 Quick Start
 
+### Docker (Recommended — works on Linux / Windows / macOS)
+
 ```bash
-# Install dependencies
+cd argus
+cp .env.example .env          # Fill in GEMINI_API_KEY
+docker compose up -d           # Starts 4 containers
+docker compose logs -f argus   # View Argus logs
+```
+
+### Local Development
+
+```bash
+cd argus
 npm install
+cp .env.example .env           # Fill in GEMINI_API_KEY
+npm run dev                    # Hot-reload dev server on :3000
+```
 
-# Start development server
-npm run dev
+## 🐳 Docker Architecture
 
-# Run tests (fast!)
-npm test
+```
+┌─────────────────────────────────────────────────────┐
+│                  docker compose                      │
+│                                                      │
+│  ┌──────────┐  ┌──────────────┐  ┌───────────────┐  │
+│  │ postgres │←─│ evolution-api │←─│    argus      │  │
+│  │ :5432    │  │ :8080         │  │ :3000         │  │
+│  └──────────┘  └──────────────┘  └───────┬───────┘  │
+│  ┌──────────┐        ↑                   │          │
+│  │  redis   │────────┘                   │ WS+HTTP  │
+│  │ :6379    │                            │          │
+│  └──────────┘                            ▼          │
+│                               Chrome Extension      │
+└─────────────────────────────────────────────────────┘
+```
+
+| Container | Image | Purpose |
+|-----------|-------|---------|
+| `argus-server` | Built from `./Dockerfile` | Express server, Gemini AI, SQLite, WebSocket |
+| `argus-evolution` | Built from `../evolution-api/Dockerfile` | WhatsApp bridge (Evolution API v2.3) |
+| `argus-postgres` | `postgres:16-alpine` | Evolution API database |
+| `argus-redis` | `redis:7-alpine` | Evolution API cache |
+
+### Docker Commands
+
+```bash
+docker compose up -d               # Start all 4 containers
+docker compose up -d --build       # Rebuild + start
+docker compose logs -f argus       # Argus logs
+docker compose logs -f evolution-api # Evolution logs
+docker compose down                # Stop
+docker compose down -v             # Stop + delete all data
+docker compose ps                  # Status
 ```
 
 ## 📁 Project Structure
@@ -20,169 +64,170 @@ npm test
 ```
 argus/
 ├── src/
-│   ├── server.ts      # Express server + WebSocket
-│   ├── db.ts          # SQLite + FTS5 database
-│   ├── gemini.ts      # Gemini API integration
-│   ├── ingestion.ts   # Message processing
-│   ├── matcher.ts     # URL context matching
-│   ├── scheduler.ts   # Time-based triggers
-│   └── types.ts       # Zod schemas
-├── extension/         # Chrome Extension (Manifest V3)
-│   ├── manifest.json
-│   ├── background.js  # URL detection
-│   ├── content.js     # Overlay notifications
-│   ├── popup.html/js  # Extension popup
-│   └── icons/         # Extension icons
-├── tests/             # Vitest tests
-├── data/              # SQLite database
-└── docker-compose.yml # Full stack deployment
+│   ├── server.ts        # Express + WebSocket server
+│   ├── db.ts            # SQLite + FTS5 database
+│   ├── gemini.ts        # Gemini AI — extraction, popup blueprints, chat
+│   ├── ingestion.ts     # WhatsApp message processing pipeline
+│   ├── matcher.ts       # URL pattern matching for context triggers
+│   ├── scheduler.ts     # Time-based reminders + snooze
+│   ├── evolution-db.ts  # Direct PostgreSQL read for message history
+│   └── types.ts         # Zod schemas + config parser
+├── extension/           # Chrome Extension (Manifest V3)
+│   ├── manifest.json    # <all_urls> content scripts
+│   ├── background.js    # WebSocket, API calls, context checks
+│   ├── content.js       # Popup overlays (8 types), DOM form watcher
+│   ├── sidepanel.html/js # AI Chat sidebar
+│   ├── popup.html/js    # Extension popup with stats
+│   └── icons/           # Extension icons
+├── tests/               # Vitest tests
+├── data/                # SQLite database (auto-created)
+├── Dockerfile           # Multi-stage Node 22 Alpine
+├── docker-compose.yml   # Full stack (4 containers)
+└── .env.example         # Environment template
 ```
 
-## 🔧 Development
-
-### Prerequisites
-
-- Node.js 22+
-- npm 10+
-
-### Commands
+## 🔧 Development Commands
 
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Start dev server with hot reload |
-| `npm run build` | Build for production |
-| `npm test` | Run tests (fast, ~2s) |
-| `npm run lint` | Lint code |
-| `npm run format` | Format code |
-| `npm run typecheck` | Type check |
+| `npm run build` | Build TypeScript → `dist/` |
+| `npm start` | Run production server |
+| `npm test` | Run tests (~2s, Vitest) |
+| `npm run lint` | Lint code (ESLint, cached) |
+| `npm run format` | Format code (Prettier) |
+| `npm run typecheck` | Type-check without emitting |
 
-### Load Chrome Extension
+## 🔌 Chrome Extension Setup
 
 1. Open `chrome://extensions/`
-2. Enable "Developer mode"
-3. Click "Load unpacked"
-4. Select the `extension/` folder
-
-## 🐳 Docker Deployment
-
-```bash
-# Start all services (Argus + Evolution API + PostgreSQL)
-docker-compose up -d
-
-# View logs
-docker-compose logs -f argus
-
-# Stop
-docker-compose down
-```
+2. Enable **Developer mode**
+3. Click **Load unpacked** → select `extension/` folder
+4. (For local `file://` testing) → Enable **Allow access to file URLs**
 
 ## 📡 API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | Health check |
-| `/api/stats` | GET | Get statistics |
-| `/api/events` | GET | List events (filter by status) |
-| `/api/events/:id` | GET | Get single event |
-| `/api/events/:id/set-reminder` | POST | Schedule event (creates 24h/1h/15min reminders) |
-| `/api/events/:id/snooze` | POST | Snooze event for X minutes |
+| `/api/stats` | GET | Statistics |
+| `/api/events` | GET | List events (filter by `?status=`) |
+| `/api/events/:id` | PATCH | Update event fields |
+| `/api/events/:id` | DELETE | Delete event |
+| `/api/events/:id/set-reminder` | POST | Schedule event |
+| `/api/events/:id/snooze` | POST | Snooze for X minutes |
 | `/api/events/:id/ignore` | POST | Ignore event |
-| `/api/events/:id/complete` | POST | Mark event done |
+| `/api/events/:id/complete` | POST | Mark done |
 | `/api/events/:id/dismiss` | POST | Dismiss notification |
 | `/api/events/:id/acknowledge` | POST | Acknowledge reminder |
-| `/api/events/:id` | DELETE | Delete event permanently |
-| `/api/events/day/:timestamp` | GET | Get all events for a day (reschedule view) |
+| `/api/events/:id/confirm-update` | POST | Confirm pending update |
+| `/api/events/day/:timestamp` | GET | Get all events for a day |
+| `/api/context-check` | POST | Check URL for matching events |
+| `/api/form-check` | POST | Check form field mismatch |
+| `/api/extract-context` | POST | Extract context from URL |
+| `/api/chat` | POST | AI Chat — context-aware conversation |
 | `/api/webhook/whatsapp` | POST | Evolution API webhook |
-| `/api/context-check` | POST | Check URL for relevant events |
-| `/api/chat` | POST | AI Chat - context-aware conversation |
 | `/ws` | WebSocket | Real-time notifications |
 
 ## 🎯 How It Works
 
-1. **WhatsApp messages** arrive via Evolution API webhook
-2. **Gemini extracts** events, tasks, and reminders
-3. **SQLite FTS5** stores and indexes everything
-4. **WebSocket broadcasts** events to connected browser extensions
-5. **Chrome extension** receives real-time event notifications
-6. **Modal overlay** appears on any browser tab with event details
-7. **Context matching** finds relevant events when browsing
+```
+WhatsApp Message → Evolution API → Webhook → Argus Server
+                                                  │
+                                         Gemini AI extracts
+                                        events/tasks/reminders
+                                                  │
+                                        SQLite FTS5 stores &
+                                         indexes everything
+                                                  │
+                                   ┌──────────────┼──────────────┐
+                                   │              │              │
+                              WebSocket      URL Match      DOM Watch
+                              (new event)   (context)      (form field)
+                                   │              │              │
+                                   └──────────────┼──────────────┘
+                                                  │
+                                          Chrome Extension
+                                         shows popup overlay
+```
 
 ## ✅ Working Scenarios
 
-### 1. Netflix Subscription
+### 1. Travel Recommendations (Goa Cashews)
 ```
-Message: "want to cancel my netflix this week"
-Trigger: Visit netflix.com
-Action: Shows reminder popup to cancel subscription
-```
-
-### 2. Goa Cashew (Travel Recommendations)
-```
-Message: "Rahul recommended cashews at Zantye's in Goa"
-Trigger: Visit any URL containing "goa" (goatourism.com, goa-flights.in)
-Action: Shows reminder about the recommendation
+💬 "Rahul recommended cashews at Zantye's in Goa"
+🌐 User visits goatourism.com
+🔔 Popup: "Rahul's Recommendation — Remember the cashews at Zantye's?"
 ```
 
-### 3. Canva Subscription
+### 2. Insurance Accuracy (Form Mismatch)
 ```
-Message: "I need to get Canva Pro for my design work"
-Trigger: Visit canva.com
-Action: Shows context reminder about Canva Pro subscription
-```
-
-### 4. Calendar Conflict
-```
-Message 1: "meeting tomorrow at 5pm"
-Message 2: "call with john tomorrow at 5pm"
-Action: Shows conflict warning popup with overlapping events
+💬 User owns Honda Civic 2018 (from WhatsApp chats)
+🌐 User visits ACKO and types "Honda Civic 2022"
+🔔 Popup: "Hold on — you own a Honda Civic 2018! You might be overpaying!"
+✏️ "Fix It" button auto-fills the correct value
 ```
 
-## 🔔 Popup Types
+### 3. Gift Intent (E-commerce)
+```
+💬 "Need to buy makeup for sis birthday"
+🌐 User visits Nykaa
+🔔 Popup: "Sale going on! You mentioned wanting makeup for your sister"
+```
 
-| Type | Icon | Use Case |
-|------|------|----------|
+### 4. Subscription Cancel (Netflix)
+```
+💬 "Want to cancel my Netflix this week"
+🌐 User visits netflix.com
+🔔 Popup: "You planned to cancel your Netflix subscription"
+```
+
+### 5. Calendar Conflict Detection
+```
+💬 "Meeting tomorrow at 5pm"
+💬 "Call with John tomorrow at 5pm"
+🔔 Popup: "You might be double-booked" + View My Day timeline
+```
+
+## 🔔 Popup Types (8)
+
+| Type | Icon | Trigger |
+|------|------|---------|
 | `event_discovery` | 📅 | New event detected from WhatsApp |
-| `event_reminder` | ⏰ | Reminders at 24h, 1h, and 15min before event |
-| `context_reminder` | 🎯 | URL matches event context (Netflix, Goa, Canva) |
-| `conflict_warning` | 🗓️ | Overlapping events — shows "View My Day" timeline |
-| `insight_card` | 💡 | Suggestions and recommendations |
-8. **Proactive notification** appears when visiting related URLs
-
-### Features
-
-- ✅ Real-time event detection from WhatsApp messages
-- ✅ Centered modal overlay notifications (like survey popups)
-- ✅ Chrome native notifications with Accept/Dismiss actions
-- ✅ Direct Evolution PostgreSQL integration for message history
-- ✅ WebSocket push for instant updates
-- ✅ Context-aware reminders based on browsing activity
-- ✅ Full-text search across all messages
-- ✅ Event cancellation/update detection
+| `event_reminder` | ⏰ | Time-based (24h, 1h, 15min before) |
+| `context_reminder` | 🎯 | URL matches event context |
+| `conflict_warning` | 🗓️ | Overlapping events detected |
+| `insight_card` | 💡 | Suggestions from conversations |
+| `snooze_reminder` | 💤 | Snoozed event fires again |
+| `update_confirm` | 📝 | Confirm event modification |
+| `form_mismatch` | ⚠️ | Form input doesn't match memory |
 
 ## ⚙️ Configuration
 
 Copy `.env.example` to `.env` and set:
 
 ```bash
+# Required
 GEMINI_API_KEY=your_key_here
+
+# Optional (defaults work for Docker)
 GEMINI_MODEL=gemini-3-flash-preview
+EVOLUTION_API_KEY=rmd_evolution_api_key_12345
+EVOLUTION_INSTANCE_NAME=arguas
 ```
 
 ## 📊 Performance
 
-- Message ingestion: <500ms
-- Context check: <800ms
-- Database query: <10ms
-- Memory usage: <200MB
-- 50k messages: ~40MB storage
+| Metric | Value |
+|--------|-------|
+| Message ingestion | <500ms |
+| Context check | <800ms |
+| Database query | <10ms |
+| Memory usage | <200MB |
+| 50k messages | ~40MB storage |
+| Test suite | ~2s |
 
 ## 🧪 Testing
-
-Tests run in ~2 seconds using Vitest with:
-- Single fork pool (faster)
-- Dot reporter (minimal output)
-- In-memory SQLite
-- Cached dependencies
 
 ```bash
 npm test              # Run all tests
@@ -192,4 +237,4 @@ npm run test:coverage # With coverage
 
 ## 📝 License
 
-Private - All rights reserved
+Private — All rights reserved
