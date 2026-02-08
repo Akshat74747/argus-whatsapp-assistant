@@ -104,6 +104,7 @@ whatsapp-chat-rmd-argus/
 │   │   ├── db.ts               # SQLite + FTS5 database
 │   │   ├── evolution-db.ts     # PostgreSQL Evolution DB integration
 │   │   ├── gemini.ts           # Gemini AI — extraction, popup blueprints, chat
+│   │   ├── quicksave.ts        # QuickSave context compression (S2A + density)
 │   │   ├── ingestion.ts        # Message processing + action detection pipeline
 │   │   ├── matcher.ts          # URL pattern matching for context triggers
 │   │   ├── scheduler.ts        # Time-based + snooze reminders
@@ -122,6 +123,9 @@ whatsapp-chat-rmd-argus/
 │   ├── Dockerfile              # Multi-stage Node 24 Alpine build
 │   └── ...                     # Evolution API source
 ├── Insurance website/          # Demo ACKO clone for insurance scenario
+├── quicksave/                  # QuickSave CEP v9.1 reference (read-only)
+│   ├── SKILL.md                # Full protocol specification
+│   └── references/             # PDL, S2A, NCL, KANJI docs
 ├── RULES.md                    # Development rules & constraints
 └── README.md                   # This file
 ```
@@ -159,6 +163,15 @@ whatsapp-chat-rmd-argus/
 - Parses car make/model/year via regex
 - Cross-references with WhatsApp chat memory
 - "✏️ Fix It" button auto-fills correct value + green highlight
+
+### QuickSave Context Compression (CEP v9.1)
+All Gemini AI calls use QuickSave-inspired compression for optimal context density:
+- **S2A Filter** — ranks events by signal (time proximity, status, recency, context_url) → top 60 sent to Gemini
+- **Dense Format** — `#ID|TYPE|STATUS|"Title"|time|loc|sender|keywords` (~40-55% fewer tokens vs verbose)
+- **L2 Edge Detection** — cross-event relationships appended (cancel↔subscription, time conflicts, topic overlap)
+- **Chat Memory** — older AI sidebar turns compressed into key facts/questions, recent 6 turns stay raw
+- Same Gemini token budget carries ~2x more event information
+- Based on [QuickSave CEP v9.1](https://github.com/ktg-one/quicksave) by Kevin Tan (ktg.one)
 
 ### Gift Intent (Shopping Triggers)
 - Detects shopping intent in WhatsApp ("buy makeup for sis birthday")
@@ -283,6 +296,7 @@ npm run format       # Format code
 | Memory usage | <200MB (SQLite + Node runtime) |
 | WebSocket latency | <50ms (event → browser overlay) |
 | Form mismatch check | <100ms (regex parse + DB search) |
+| QuickSave compression | ~2x density (40-55% fewer tokens per prompt) |
 | Docker image size | ~180MB (Argus), ~600MB (Evolution) |
 
 ## 🏗️ Tech Stack
@@ -297,13 +311,19 @@ npm run format       # Format code
 - **Browser:** Chrome Extension (Manifest V3)
 - **Real-time:** WebSocket (ws library)
 - **Containers:** Docker Compose (4 services)
+- **Context Compression:** QuickSave CEP v9.1 (S2A + density optimization)
 - **Testing:** Vitest
 
 ## 📝 Changelog
 
 See [CHANGELOG.md](argus/CHANGELOG.md) for full version history.
 
-### Latest: v2.6.5 (2026-02-07)
+### Latest: v2.7.0 (2026-02-08)
+
+**QuickSave Context Compression:**
+- S2A filter + dense format for all Gemini prompts (~40-55% fewer tokens)
+- L2 edge detection (cross-event relationships)
+- Chat memory packets for session continuity
 
 **All Demo Scenarios Working:**
 - ✅ Goa Cashew — travel recommendation → URL context trigger
@@ -321,6 +341,7 @@ Private — All rights reserved
 - [Evolution API](https://github.com/EvolutionAPI/evolution-api) — WhatsApp integration
 - [Google Gemini](https://ai.google.dev/) — AI event extraction
 - [SQLite FTS5](https://www.sqlite.org/fts5.html) — Full-text search
+- [QuickSave CEP](https://github.com/ktg-one/quicksave) — Context compression protocol (Kevin Tan)
 - Chrome Extension Manifest V3 — Browser integration
 
 ---

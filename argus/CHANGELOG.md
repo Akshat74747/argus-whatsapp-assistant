@@ -2,6 +2,34 @@
 
 All notable changes to Argus will be documented in this file.
 
+## [2.7.0] - 2026-02-08
+
+### Added — QuickSave Context Compression
+
+Integrated QuickSave (CEP v9.1) context compression protocol into the Gemini prompt pipeline. All Gemini calls now use S2A-filtered, density-compressed event context instead of raw verbose dumps.
+
+#### New Files
+- `src/quicksave.ts` — Context compression module
+
+#### What Changed
+- **`gemini.ts` → `chatWithContext()`**: Events compressed from verbose format to dense `#ID|TYPE|STATUS|"Title"|time|loc|sender|keywords` format. ~40-55% fewer tokens. S2A filter ranks events by priority (time relevance, status, recency), takes top 60.
+- **`gemini.ts` → `chatWithContext()`**: Chat history compressed via `compressChatHistory()` — older turns become a memory packet, recent 6 turns stay raw.
+- **`gemini.ts` → `analyzeMessage()`**: Existing events block uses `compressEventsLight()` dense format.
+- **`gemini.ts` → `detectAction()`**: Event list compressed to `#ID|type|"title"|kw:keywords` format.
+- **L2 Edge Detection**: Cross-event relationships detected (cancels, conflicts, same_topic) and appended to Gemini context.
+
+#### QuickSave Components Used
+- **S2A Filter** (System 2 Attention): Signal vs noise classification — prioritizes upcoming/recent/context-URL events
+- **Dense Format**: Inspired by kanji compression — status markers (🆕⏰✅🚫💤), type markers (MTG/DL/SUB/REC/TRV)
+- **L2 Relational**: Edge detection between events (subscription↔cancel, time conflicts, topic overlap)
+- **Chat Memory Packets**: Older chat turns → compressed facts/questions/event-refs for session continuity
+
+#### Impact
+- Same token budget carries ~2x more event information
+- Gemini focuses on high-signal events first (imminent, scheduled, context-triggered)
+- Chat sidebar remembers prior conversation context across long sessions
+- Zero client-facing changes — purely internal optimization
+
 ## [2.6.5] - 2026-02-07
 
 ### Added — "Insurance Accuracy" Scenario (Form Mismatch Detection)

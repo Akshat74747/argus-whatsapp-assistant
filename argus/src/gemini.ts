@@ -1,4 +1,5 @@
 import type { GeminiExtraction, GeminiValidation, Event } from './types.js';
+import { compressEventsForPrompt, compressChatHistory, compressEventsLight } from './quicksave.js';
 
 interface GeminiConfig {
   apiKey: string;
@@ -103,16 +104,9 @@ export async function analyzeMessage(
     ? `\nPrevious messages in this chat (for context):\n${context.map((m, i) => `${i + 1}. "${m}"`).join('\n')}\n`
     : '';
 
+  // QuickSave: compressed event format (~40% fewer tokens)
   const existingEventsBlock = existingEvents.length > 0
-    ? `\nUser's EXISTING events/reminders (they may refer to these):\n${existingEvents.map((e) => {
-        let timeStr = 'no date set';
-        if (e.event_time) {
-          const d = new Date(e.event_time * 1000);
-          timeStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-          timeStr += ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-        }
-        return `  [ID#${e.id}] "${e.title}" | type: ${e.event_type} | time: ${timeStr} | location: ${e.location || 'none'} | keywords: ${e.keywords} | sender: ${e.sender_name || 'unknown'}`;
-      }).join('\n')}\n`
+    ? `\nUser's EXISTING events/reminders (they may refer to these):\n${compressEventsLight(existingEvents)}\n`
     : '';
 
   const prompt = `Analyze this WhatsApp message. First decide if it contains any real event/task/reminder. If yes, extract them. If no, return empty events array.
@@ -378,8 +372,9 @@ export async function detectAction(
   existingEvents: Array<{ id: number; title: string; event_type: string; keywords: string }> = [],
   messageTimestamp?: number
 ): Promise<ActionResult> {
+  // QuickSave: compressed event list for action detection
   const eventsBlock = existingEvents.length > 0
-    ? `\nUser's existing events/reminders:\n${existingEvents.map((e, i) => `[${i}] #${e.id}: "${e.title}" (type: ${e.event_type}, keywords: ${e.keywords})`).join('\n')}\n`
+    ? `\nUser's existing events/reminders:\n${existingEvents.map((e, i) => `[${i}] #${e.id}|${e.event_type}|"${e.title}"|kw:${e.keywords}`).join('\n')}\n`
     : '';
 
   const contextBlock = context.length > 0
@@ -537,28 +532,22 @@ export async function chatWithContext(
 ): Promise<ChatResponse> {
   const dateContext = formatDateContext();
 
-  const eventsBlock = events.length > 0
-    ? events.map((e, i) => {
-        let timeStr = 'no date set';
-        if (e.event_time) {
-          const d = new Date(e.event_time * 1000);
-          timeStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-          timeStr += ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-          if (d.getTime() < Date.now()) timeStr += ' [PAST]';
-        }
-        return `[${i}] ID#${e.id} | "${e.title}" | type: ${e.event_type} | time: ${timeStr} | location: ${e.location || 'none'} | status: ${e.status} | sender: ${e.sender_name || 'unknown'} | keywords: ${e.keywords}${e.description ? ' | desc: ' + e.description : ''}`;
-      }).join('\n')
-    : 'No events stored yet.';
+  // QuickSave: S2A filter + dense compression (~40-55% fewer tokens)
+  const compressed = compressEventsForPrompt(events as any);
+  const eventsBlock = compressed.events;
+  console.log(`📦 [QS] Chat context: ${events.length} events → ${compressed.eventCount} selected (${compressed.compressionRatio.toFixed(1)}x compression, ~${compressed.tokenEstimate} tokens)`);
 
-  const historyBlock = history.length > 0
-    ? history.slice(-6).map(h => `${h.role === 'user' ? 'User' : 'Argus'}: ${h.content}`).join('\n')
+  // QuickSave: compress older chat history into memory packet
+  const { recentHistory, memoryPacket } = compressChatHistory(history);
+  const historyBlock = recentHistory.length > 0
+    ? recentHistory.map(h => `${h.role === 'user' ? 'User' : 'Argus'}: ${h.content}`).join('\n')
     : '';
 
   const prompt = `You are Argus AI, a helpful and conversational memory assistant. You have access to the user's saved events, tasks, reminders and recommendations from their WhatsApp conversations.
 
 ${dateContext}
-
-=== USER'S EVENTS/TASKS ===
+${memoryPacket ? `\n=== PRIOR CONTEXT (compressed) ===\n${memoryPacket}\n` : ''}
+=== USER'S EVENTS/TASKS (compressed format: #ID|TYPE|STATUS|"Title"|time|location|sender|keywords) ===
 ${eventsBlock}
 
 ${historyBlock ? `=== RECENT CONVERSATION ===\n${historyBlock}\n` : ''}

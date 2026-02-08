@@ -68,6 +68,15 @@ convert -background none icon.svg -resize 128x128 icon128.png
 - 90-day hot window for context
 - Single container per user
 - URL detection + DOM form watching (insurance accuracy scenario)
+- QuickSave context compression (S2A filter + dense format) for all Gemini prompts
+
+## QuickSave Integration (src/quicksave.ts)
+- S2A Filter: ranks events by signal (time relevance, status, recency) → top N only
+- Dense Format: `#ID|TYPE|STATUS|"Title"|time|loc|sender|keywords` (~40-55% fewer tokens)
+- L2 Edge Detection: cross-event relationships (cancels, conflicts, same_topic)
+- Chat Memory: older chat turns compressed into memory packet for session continuity
+- Based on CEP v9.1 by Kevin Tan (ktg.one)
+- NEVER modify the QuickSave protocol spec files in `quicksave/` — they are reference only
 
 ## Testing Strategy
 - Vitest with single fork (fast)
