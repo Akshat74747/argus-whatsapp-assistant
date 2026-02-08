@@ -68,6 +68,121 @@ if (config.evolutionPg) {
   });
 }
 
+// ============ Auto-setup Evolution API Instance ============
+// Creates the WhatsApp instance + configures webhook on startup
+// so Evolution pushes all new messages to /api/webhook/whatsapp
+async function autoSetupEvolution(): Promise<void> {
+  const apiUrl = config.evolutionApiUrl;
+  const apiKey = config.evolutionApiKey;
+  const instanceName = config.evolutionInstanceName;
+
+  if (!apiUrl || !apiKey || !instanceName) {
+    console.log('⚠️ Evolution API not configured, skipping auto-setup');
+    return;
+  }
+
+  const headers = { 'Content-Type': 'application/json', apikey: apiKey };
+  // In Docker: argus container name. Local dev: localhost
+  const selfHost = process.env.DOCKER_ENV === 'true' ? `http://argus:${config.port}` : `http://localhost:${config.port}`;
+  const webhookUrl = `${selfHost}/api/webhook/whatsapp`;
+
+  // Retry loop — Evolution may not be ready yet on first boot
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      // 1. Check if instance already exists
+      const fetchRes = await fetch(`${apiUrl}/instance/fetchInstances`, { headers });
+      if (!fetchRes.ok) throw new Error(`fetchInstances: ${fetchRes.status}`);
+
+      // Response format: [{ name: "argus", connectionStatus: "open", id: "uuid", ... }]
+      const instances = await fetchRes.json() as Array<{ name?: string; connectionStatus?: string }>;
+      const existing = instances.find((i) => i.name === instanceName);
+
+      if (existing) {
+        console.log(`✅ Evolution instance "${instanceName}" exists (status: ${existing.connectionStatus || 'unknown'})`);
+      } else {
+        // 2. Create the instance with webhook
+        console.log(`🔧 Creating Evolution instance "${instanceName}"...`);
+        const createRes = await fetch(`${apiUrl}/instance/create`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            instanceName,
+            integration: 'WHATSAPP-BAILEYS',
+            qrcode: true,
+            webhook: {
+              enabled: true,
+              url: webhookUrl,
+              byEvents: false,
+              base64: false,
+              events: [
+                'MESSAGES_UPSERT',
+                'MESSAGES_UPDATE',
+                'CONNECTION_UPDATE',
+              ],
+            },
+          }),
+        });
+
+        if (createRes.status === 403) {
+          // "already in use" — instance exists in DB but wasn't loaded in memory yet
+          console.log(`✅ Instance "${instanceName}" already exists in DB (restarted)`);
+        } else if (!createRes.ok) {
+          const errBody = await createRes.text();
+          throw new Error(`createInstance: ${createRes.status} — ${errBody}`);
+        } else {
+          const created = await createRes.json() as Record<string, unknown>;
+          console.log(`✅ Instance "${instanceName}" created`);
+          if ((created?.qrcode as Record<string, unknown>)?.base64) {
+            console.log(`📱 QR Code ready — open Evolution Manager at ${apiUrl} to scan`);
+          }
+        }
+      }
+
+      // 3. Ensure per-instance webhook is set (even if instance pre-existed)
+      try {
+        const whRes = await fetch(`${apiUrl}/webhook/set/${instanceName}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            webhook: {
+              enabled: true,
+              url: webhookUrl,
+              byEvents: false,
+              base64: false,
+              events: [
+                'MESSAGES_UPSERT',
+                'MESSAGES_UPDATE',
+                'CONNECTION_UPDATE',
+              ],
+            },
+          }),
+        });
+        if (whRes.ok) {
+          console.log(`✅ Webhook → ${webhookUrl}`);
+        } else {
+          console.log(`ℹ️  Per-instance webhook: ${whRes.status} (global webhook is backup)`);
+        }
+      } catch {
+        // Global webhook is also enabled in compose, so this is just a backup
+        console.log('ℹ️  Per-instance webhook skipped (global webhook active)');
+      }
+
+      return; // success — exit retry loop
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (attempt < 10) {
+        console.log(`⏳ Evolution API not ready (attempt ${attempt}/10): ${msg}`);
+        await new Promise(r => setTimeout(r, 5000)); // wait 5s
+      } else {
+        console.log(`⚠️ Evolution auto-setup failed after 10 attempts: ${msg}`);
+        console.log('   → Create instance manually at Evolution Manager dashboard');
+      }
+    }
+  }
+}
+
+// Fire and forget — don't block server startup
+autoSetupEvolution();
 // Create Express app
 const app = express();
 app.use(cors());

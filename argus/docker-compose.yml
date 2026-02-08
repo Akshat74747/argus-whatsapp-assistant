@@ -94,12 +94,14 @@ services:
       - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
       # Logging
       - LOG_LEVEL=ERROR,WARN,DEBUG,INFO,LOG,VERBOSE,DARK,WEBHOOKS,WEBSOCKET
+      # Global webhook → pushes ALL messages to Argus
+      - WEBHOOK_GLOBAL_ENABLED=true
+      - WEBHOOK_GLOBAL_URL=http://argus:3000/api/webhook/whatsapp
+      - WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS=false
       # Disable unused integrations
       - RABBITMQ_ENABLED=false
       - SQS_ENABLED=false
       - WEBSOCKET_ENABLED=false
-      - WEBHOOK_GLOBAL_ENABLED=false
-      - WEBHOOK_GLOBAL_URL=
     volumes:
       - evolution_instances:/evolution/instances
       - evolution_store:/evolution/store
