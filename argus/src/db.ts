@@ -214,7 +214,7 @@ export function findDuplicateEvent(title: string, hoursWindow: number = 48): Eve
   // Exact title match (case-insensitive)
   const exactMatch = getDb().prepare(`
     SELECT * FROM events
-    WHERE LOWER(TRIM(title)) = ? AND created_at > ? AND status NOT IN ('completed', 'expired')
+    WHERE LOWER(TRIM(title)) = ? AND created_at > ? AND status NOT IN ('completed', 'expired', 'ignored')
     LIMIT 1
   `).get(normalizedTitle, cutoff) as Event | undefined;
   
@@ -224,14 +224,31 @@ export function findDuplicateEvent(title: string, hoursWindow: number = 48): Eve
   // This catches cases like "Try cashews at Zantyes" vs "Try cashews at Zantye's"
   const recentEvents = getDb().prepare(`
     SELECT * FROM events
-    WHERE created_at > ? AND status NOT IN ('completed', 'expired')
+    WHERE created_at > ? AND status NOT IN ('completed', 'expired', 'ignored')
     ORDER BY created_at DESC
     LIMIT 100
   `).all(cutoff) as Event[];
   
   for (const existing of recentEvents) {
     const existingTitle = existing.title.trim().toLowerCase();
-    // One title contains the other (handles slight variations)
+    
+    // Skip very short existing titles (1-2 words) — too generic to match on substring
+    // e.g. "Meeting" should NOT match "Meeting with Nityam at 5pm"
+    const existingWords = existingTitle.split(/\s+/).length;
+    const newWords = normalizedTitle.split(/\s+/).length;
+    
+    if (existingWords <= 2 || newWords <= 2) {
+      // For short titles: only match if they're essentially the same (exact or cleaned)
+      const cleanExisting = existingTitle.replace(/[''`\-]/g, '');
+      const cleanNew = normalizedTitle.replace(/[''`\-]/g, '');
+      if (cleanExisting === cleanNew) {
+        return existing;
+      }
+      continue;
+    }
+    
+    // For longer titles (3+ words): allow substring containment
+    // This catches "Try cashews at Zantyes" vs "Try cashews at Zantye's"
     if (existingTitle.includes(normalizedTitle) || normalizedTitle.includes(existingTitle)) {
       return existing;
     }
@@ -549,7 +566,7 @@ export function findActiveEventsByKeywords(keywords: string[]): Event[] {
 export function getActiveEvents(limit = 20): Event[] {
   const stmt = getDb().prepare(`
     SELECT * FROM events
-    WHERE status NOT IN ('completed', 'expired', 'ignored')
+    WHERE status NOT IN ('completed', 'expired', 'ignored', 'dismissed')
     ORDER BY created_at DESC
     LIMIT ?
   `);

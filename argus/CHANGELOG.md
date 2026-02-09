@@ -2,6 +2,23 @@
 
 All notable changes to Argus will be documented in this file.
 
+## [2.7.1] - 2026-02-09
+
+### Fixed — Webhook Pipeline & Code Compliance
+
+#### Bug Fixes
+- **autoSetupEvolution()**: Fixed wrong fetchInstances response format (`i.instance?.instanceName` → `i.name`) and 403 "already in use" now handled as success
+- **Action "none" swallowing messages**: Gemini returning `isAction: true, action: "none"` caused messages to enter the action handler's default case and never reach event extraction. Added `action !== 'none'` guard in `ingestion.ts` and `server.ts`
+- **Dedup false positives**: Short titles (1-2 words) like "Meeting" were substring-matching "Meeting with Nityam at 5pm", blocking valid new events. Now requires exact match for short titles, substring only for 3+ word titles
+
+#### Code Compliance
+- **PopupTypeEnum** in `types.ts`: Added 3 missing types (`snooze_reminder`, `update_confirm`, `form_mismatch`) — code was using them but the Zod enum only had 5 of 8
+- **Version banner**: Updated from v2.6.2 to v2.7.1
+
+#### Documentation
+- **INFO.md**: Fixed version (2.3.0 → 2.7.1), corrected "NOT using Redis/PostgreSQL" (we do use them for Evolution API), fixed webhook body format to match actual Evolution API payload
+- **Audit**: Verified all 5 demo scenarios, all 18 API endpoints, all 8 popup types, QuickSave integration, and event lifecycle match documentation
+
 ## [2.7.0] - 2026-02-08
 
 ### Added — QuickSave Context Compression

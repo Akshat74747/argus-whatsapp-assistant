@@ -639,6 +639,8 @@ app.post('/api/chat', async (req: Request, res: Response) => {
 // WhatsApp webhook
 app.post('/api/webhook/whatsapp', async (req: Request, res: Response) => {
   try {
+    console.log(`📩 [WEBHOOK] Received event: ${req.body.event} from instance: ${req.body.instance}`);
+    
     // Only process messages.upsert events (new messages)
     // Ignore messages.update (read receipts, status updates)
     if (req.body.event !== 'messages.upsert') {
@@ -658,7 +660,7 @@ app.post('/api/webhook/whatsapp', async (req: Request, res: Response) => {
     });
 
     // ============ Handle ACTION results (cancel, done, postpone, etc.) ============
-    if (result.actionPerformed) {
+    if (result.actionPerformed && result.actionPerformed.action !== 'none') {
       console.log(`🎯 [WEBHOOK] Action performed: ${result.actionPerformed.action} on "${result.actionPerformed.targetEventTitle}" (id: ${result.actionPerformed.targetEventId})`);
       
       // Broadcast the action to all clients so they update their UI
@@ -966,7 +968,7 @@ server.listen(config.port, () => {
 ║    ██║  ██║██║  ██║╚██████╔╝╚██████╔╝███████║            ║
 ║    ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚══════╝            ║
 ║                                                           ║
-║    Proactive Memory Assistant v2.6.2                     ║
+║    Proactive Memory Assistant v2.7.1                     ║
 ║    Model: ${config.geminiModel.padEnd(30)}        ║
 ║    Port:  ${config.port.toString().padEnd(30)}        ║
 ║                                                           ║

@@ -1,8 +1,8 @@
 # Argus - Ultra-Simple Architecture
 
-**Version:** 2.3.0  
-**Last Updated:** February 5, 2026  
-**Status:** Active Development - Chrome Extension + WebSocket Popups Working
+**Version:** 2.7.1  
+**Last Updated:** February 9, 2026  
+**Status:** Active Development - Full Pipeline Working (Evolution → Webhook → Gemini → Extension Overlays)
 
 ---
 
@@ -33,10 +33,13 @@
 ❌ FAISS vector store  
 ❌ OpenAI embeddings  
 ❌ RAG pipelines  
-❌ Redis  
-❌ PostgreSQL  
 ❌ Multi-stage LLM calls  
 ❌ Token compression libraries  
+
+### External Dependencies (Evolution API)
+✅ PostgreSQL 16 — Evolution API database  
+✅ Redis 7 — Evolution API cache  
+(These are used by Evolution API, not Argus core which uses SQLite only)  
 
 ---
 
@@ -411,7 +414,7 @@ argus/
 ```typescript
 // Webhook from Evolution API
 POST /api/webhook/whatsapp
-Body: { message: {...}, sender: "...", chat_id: "..." }
+Body: { event: "messages.upsert", instance: "arguas", data: { key: { remoteJid, fromMe, id }, pushName, message: { conversation }, messageTimestamp } }
 
 // Context check from Chrome extension
 POST /api/context-check

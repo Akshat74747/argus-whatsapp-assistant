@@ -123,7 +123,7 @@ export async function processWebhook(
     keywords: e.keywords,
   })), timestamp);
 
-  if (actionResult.isAction && actionResult.confidence >= 0.6) {
+  if (actionResult.isAction && actionResult.confidence >= 0.6 && actionResult.action !== 'none') {
     console.log(`🎯 [ACTION] Detected action: "${actionResult.action}" on "${actionResult.targetDescription}" (confidence: ${actionResult.confidence})`);
     
     // Find the target event

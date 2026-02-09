@@ -68,6 +68,9 @@ export const PopupTypeEnum = z.enum([
   'context_reminder',   // URL-based trigger (Netflix) - persistent until done
   'conflict_warning',   // Calendar conflict detected
   'insight_card',       // Recommendation/suggestion
+  'snooze_reminder',    // Snoozed event fires again
+  'update_confirm',     // Message suggests event changes - needs confirmation
+  'form_mismatch',      // DOM form field contradicts WhatsApp memory
 ]);
 export type PopupType = z.infer<typeof PopupTypeEnum>;
 

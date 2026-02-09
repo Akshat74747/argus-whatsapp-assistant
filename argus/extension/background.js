@@ -163,26 +163,28 @@ async function handleWebSocketMessage(data) {
 async function sendToFirstAvailableTab(message) {
   try {
     const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    console.log('[Argus] 🔍 Looking for tab to send', message.type, '| active tabs:', activeTabs.length);
     for (const tab of activeTabs) {
       if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
         if (await trySendToTab(tab.id, message)) {
-          console.log('[Argus] Sent to active tab');
+          console.log('[Argus] Sent to active tab:', tab.id, tab.url?.substring(0, 50));
           return true;
         }
       }
     }
     
     const allTabs = await chrome.tabs.query({});
+    console.log('[Argus] No active tab worked, trying all', allTabs.length, 'tabs...');
     for (const tab of allTabs) {
       if (tab.id && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
         if (await trySendToTab(tab.id, message)) {
-          console.log('[Argus] Sent to tab ' + tab.id);
+          console.log('[Argus] Sent to tab ' + tab.id + ':', tab.url?.substring(0, 50));
           return true;
         }
       }
     }
     
-    console.log('[Argus] No tabs available');
+    console.log('[Argus] ❌ No tabs available to show popup!');
     return false;
   } catch (e) {
     console.error('[Argus] Send error:', e.message);
@@ -196,11 +198,15 @@ async function trySendToTab(tabId, message) {
     return true;
   } catch (e) {
     try {
+      console.log('[Argus] Content script not ready on tab ' + tabId + ', injecting...');
       await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
-      await new Promise(r => setTimeout(r, 100));
+      // Wait longer for content script to fully initialize (set up listeners)
+      await new Promise(r => setTimeout(r, 500));
       await chrome.tabs.sendMessage(tabId, message);
+      console.log('[Argus] ✅ Sent after injecting content script on tab ' + tabId);
       return true;
     } catch (e2) {
+      console.log('[Argus] ❌ Failed to send to tab ' + tabId + ':', e2.message);
       return false;
     }
   }
